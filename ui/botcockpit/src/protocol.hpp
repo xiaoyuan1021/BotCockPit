@@ -17,6 +17,9 @@ constexpr uint8_t MSG_CMD_ESTOP = 0x22;
 constexpr uint8_t MSG_CMD_RESET = 0x23;
 constexpr uint8_t MSG_CMD_ACK = 0x2F;
 constexpr uint8_t MSG_EVENT_FAULT = 0x30;
+constexpr uint8_t MSG_PARAM_GET = 0x40;
+constexpr uint8_t MSG_PARAM_SET = 0x41;
+constexpr uint8_t MSG_PARAM_ACK = 0x42;
 
 constexpr uint8_t FLAG_NEED_ACK = 0x01;
 constexpr uint8_t FLAG_URGENT = 0x02;
