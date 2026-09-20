@@ -73,6 +73,8 @@ void RobotState::resetRemote()
     pose_y_ = 0.0;
     pose_yaw_ = 0.0;
     battery_ = 0.0;
+    has_robot_state_ = false;
+    state_ts_ms_ = 0;
     task_id_.clear();
     task_type_.clear();
     task_status_ = QStringLiteral("NONE");
@@ -86,6 +88,8 @@ void RobotState::resetRemote()
     emit controlEnabledChanged();
     emit poseChanged();
     emit batteryChanged();
+    emit hasRobotStateChanged();
+    emit stateTsMsChanged();
     emit taskChanged();
     emit faultsChanged();
     emit heartbeatRttMsChanged();
@@ -152,6 +156,22 @@ void RobotState::applyState(const QVariantMap& map)
         if (!qFuzzyCompare(battery_ + 1.0, v + 1.0)) {
             battery_ = v;
             emit batteryChanged();
+        }
+    }
+
+    // 机器人侧完整状态（fake_robot 经 bridge 转发）才带 battery/pose/nodes
+    const bool robot_state = map.contains(QStringLiteral("battery")) ||
+                             map.contains(QStringLiteral("nodes")) ||
+                             map.contains(QStringLiteral("pose"));
+    if (robot_state != has_robot_state_) {
+        has_robot_state_ = robot_state;
+        emit hasRobotStateChanged();
+    }
+    if (map.contains(QStringLiteral("ts_ms"))) {
+        const qint64 ts = static_cast<qint64>(map.value(QStringLiteral("ts_ms")).toLongLong());
+        if (ts != state_ts_ms_) {
+            state_ts_ms_ = ts;
+            emit stateTsMsChanged();
         }
     }
 

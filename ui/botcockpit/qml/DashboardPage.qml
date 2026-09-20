@@ -169,19 +169,31 @@ Pane {
                 Label {
                     anchors.centerIn: parent
                     visible: nodeView.count === 0
-                    text: robotState.connected
-                          ? qsTr("Waiting for state…")
-                          : qsTr("Offline — connect to bridge")
-                    opacity: 0.6
+                    width: parent.width * 0.9
+                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.WordWrap
+                    text: {
+                        if (!robotState.connected)
+                            return qsTr("Offline — connect to bridge")
+                        if (!robotState.hasRobotState)
+                            return qsTr("Bridge online — waiting for robot state.\nStart fake_robot, then: lifecycle configure + activate")
+                        return qsTr("Waiting for state…")
+                    }
+                    opacity: 0.7
                 }
             }
         }
 
         Label {
-            text: qsTr("Faults: ") + (robotState.faultCount === 0
+            text: robotState.connected && !robotState.hasRobotState
+                  ? qsTr("Robot state: NOT RECEIVED — activate fake_robot (ros2 lifecycle set /fake_robot configure && activate)")
+                  : (qsTr("Faults: ") + (robotState.faultCount === 0
                                       ? qsTr("none")
-                                      : (robotState.faultCount + " — " + robotState.faultsSummary))
-            color: robotState.faultCount > 0 ? "#8a1f1f" : palette.text
+                                      : (robotState.faultCount + " — " + robotState.faultsSummary)))
+            color: (robotState.connected && !robotState.hasRobotState) || robotState.faultCount > 0
+                   ? "#8a1f1f" : palette.text
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
         }
     }
 }

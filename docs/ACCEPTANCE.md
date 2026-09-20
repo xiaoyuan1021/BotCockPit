@@ -28,7 +28,7 @@
 | A5 | 粘包 / 半包 | PASS | `--self-test` PASS；`--send-sticky` 一次 write 161 字节，bridge 正常解析并回 ACK | |
 | A6 | 优雅退出 | PASS | `ss -lptn \| grep 8765`：运行中有 LISTEN；`Ctrl+C` 后无输出，端口释放 | 修复 SIGINT 后复测通过 |
 | A7 | 文档一致 | PASS（抽查） | type/flags/seq/JSON 与 PROTOCOL.md v0.1 一致；CMD_ACK 回显 seq | |
-| A8 | QML 体验 | 进行中 | 开始构建 ui/botcockpit | 依赖 Qt6 |
+| A8 | QML 体验 | 进行中（连接已通） | Qt6.2 QML 编译成功并连接：ONLINE · RTT 1ms · proto 0.1 · server botcockpit_bridge/0.1.0 | 待 Dashboard 数据刷新 + 断线 OFFLINE |
 
 **本周结论**：协议与 ROS 侧主路径（A1–A7）通过；A8 QML 待补测后可宣布「第 1 周完成」。
 

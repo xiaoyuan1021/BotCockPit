@@ -26,6 +26,8 @@ class RobotState : public QObject
     Q_PROPERTY(double poseY READ poseY NOTIFY poseChanged)
     Q_PROPERTY(double poseYaw READ poseYaw NOTIFY poseChanged)
     Q_PROPERTY(double battery READ battery NOTIFY batteryChanged)
+    Q_PROPERTY(bool hasRobotState READ hasRobotState NOTIFY hasRobotStateChanged)
+    Q_PROPERTY(qint64 stateTsMs READ stateTsMs NOTIFY stateTsMsChanged)
     Q_PROPERTY(QString taskId READ taskId NOTIFY taskChanged)
     Q_PROPERTY(QString taskType READ taskType NOTIFY taskChanged)
     Q_PROPERTY(QString taskStatus READ taskStatus NOTIFY taskChanged)
@@ -52,6 +54,8 @@ public:
     double poseY() const { return pose_y_; }
     double poseYaw() const { return pose_yaw_; }
     double battery() const { return battery_; }
+    bool hasRobotState() const { return has_robot_state_; }
+    qint64 stateTsMs() const { return state_ts_ms_; }
     QString taskId() const { return task_id_; }
     QString taskType() const { return task_type_; }
     QString taskStatus() const { return task_status_; }
@@ -83,6 +87,8 @@ signals:
     void controlEnabledChanged();
     void poseChanged();
     void batteryChanged();
+    void hasRobotStateChanged();
+    void stateTsMsChanged();
     void taskChanged();
     void faultsChanged();
 
@@ -104,6 +110,8 @@ private:
     double pose_y_ = 0.0;
     double pose_yaw_ = 0.0;
     double battery_ = 0.0;
+    bool has_robot_state_ = false;
+    qint64 state_ts_ms_ = 0;
     QString task_id_;
     QString task_type_;
     QString task_status_ = QStringLiteral("NONE");

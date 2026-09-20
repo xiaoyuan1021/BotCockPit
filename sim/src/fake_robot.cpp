@@ -164,7 +164,10 @@ CallbackReturn FakeRobot::on_configure(const rclcpp_lifecycle::State&)
       "botcockpit/cmd", rclcpp::QoS(10),
       std::bind(&FakeRobot::on_cmd, this, std::placeholders::_1));
 
-  RCLCPP_INFO(get_logger(), "configured: publishers/subscribers ready");
+  // WEEK1: configure 后即可发布状态（activate 前 bridge/QML 也能看到字段）
+  publish_state();
+  RCLCPP_INFO(get_logger(),
+              "configured: state publisher ready on botcockpit/state");
   return CallbackReturn::SUCCESS;
 }
 
@@ -178,6 +181,8 @@ CallbackReturn FakeRobot::on_activate(const rclcpp_lifecycle::State&)
     control_enabled_ = false;
     idle_tp_ = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
     last_tick_tp_ = std::chrono::steady_clock::now();
+    // 立刻发一帧，避免 UI 在首个 tick 前一直显示 0
+    publish_state();
   }
   tick_timer_ = create_wall_timer(
       std::chrono::milliseconds(200),

@@ -296,9 +296,12 @@ void TcpServer::handle_frame(const std::shared_ptr<Client>& client,
               "\",\"server\":\"" + SERVER_NAME + "\"}";
         send_frame(client, MSG_HELLO_ACK, 0, frame.seq, ack);
         client->hello_ok = true;
-        const std::string state =
-            inject_runtime_fields(state_provider_ ? state_provider_() : "{}",
-                                  "ONLINE");
+        const std::string raw_state = state_provider_ ? state_provider_() : "{}";
+        if (raw_state.find("\"battery\"") == std::string::npos) {
+          log_("[tcp] robot state has no battery/pose — start fake_robot and "
+               "lifecycle configure+activate");
+        }
+        const std::string state = inject_runtime_fields(raw_state, "ONLINE");
         send_frame(client, MSG_STATE_SNAPSHOT, 0, 0, state);
       } else {
         ack = "{\"ok\":false,\"reason\":\"proto_unsupported\"}";
