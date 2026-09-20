@@ -61,6 +61,7 @@ void SocketWorker::connectToHost(const QString& host, int port)
     }
     decoder_.clear();
     hb_send_ts_.clear();
+    pending_cmd_name_.clear();
     hello_sent_ = false;
     hello_ok_ = false;
     last_rx_ms_ = nowMs();
@@ -111,10 +112,11 @@ void SocketWorker::failAndClose(const QString& message)
     disconnectFromHost();
 }
 
-void SocketWorker::sendFrame(uint8_t type, uint8_t flags, const std::string& payload)
+uint16_t SocketWorker::sendFrame(uint8_t type, uint8_t flags,
+                                 const std::string& payload)
 {
     if (!socket_ || socket_->state() != QAbstractSocket::ConnectedState) {
-        return;
+        return 0;
     }
     const uint16_t seq = next_seq_++;
     if (next_seq_ == 0) {
@@ -123,6 +125,69 @@ void SocketWorker::sendFrame(uint8_t type, uint8_t flags, const std::string& pay
     const auto bytes = botcockpit_ui::encode_frame(type, flags, seq, payload);
     socket_->write(reinterpret_cast<const char*>(bytes.data()),
                    static_cast<qint64>(bytes.size()));
+    return seq;
+}
+
+void SocketWorker::sendCmdMode(const QString& mode)
+{
+    const QByteArray payload =
+        QJsonDocument(QJsonObject{{QStringLiteral("mode"), mode}})
+            .toJson(QJsonDocument::Compact);
+    const uint16_t seq = sendFrame(
+        botcockpit_ui::MSG_CMD_MODE, botcockpit_ui::FLAG_NEED_ACK,
+        std::string(payload.constData(), payload.size()));
+    if (seq) {
+        pending_cmd_name_.insert(seq, QStringLiteral("CMD_MODE"));
+    }
+}
+
+void SocketWorker::sendCmdTask(const QString& taskId, const QString& type,
+                               double x, double y, double timeoutS)
+{
+    QJsonObject obj{
+        {QStringLiteral("task_id"), taskId},
+        {QStringLiteral("type"), type},
+    };
+    if (type == QLatin1String("goto")) {
+        obj.insert(QStringLiteral("x"), x);
+        obj.insert(QStringLiteral("y"), y);
+        obj.insert(QStringLiteral("timeout_s"), timeoutS);
+    }
+    const QByteArray payload =
+        QJsonDocument(obj).toJson(QJsonDocument::Compact);
+    const uint16_t seq = sendFrame(
+        botcockpit_ui::MSG_CMD_TASK, botcockpit_ui::FLAG_NEED_ACK,
+        std::string(payload.constData(), payload.size()));
+    if (seq) {
+        pending_cmd_name_.insert(seq, QStringLiteral("CMD_TASK"));
+    }
+}
+
+void SocketWorker::sendCmdEstop(const QString& reason)
+{
+    const QByteArray payload =
+        QJsonDocument(QJsonObject{{QStringLiteral("reason"), reason}})
+            .toJson(QJsonDocument::Compact);
+    const uint16_t seq = sendFrame(botcockpit_ui::MSG_CMD_ESTOP,
+                                   botcockpit_ui::FLAG_URGENT |
+                                       botcockpit_ui::FLAG_NEED_ACK,
+                                   std::string(payload.constData(), payload.size()));
+    if (seq) {
+        pending_cmd_name_.insert(seq, QStringLiteral("CMD_ESTOP"));
+    }
+}
+
+void SocketWorker::sendCmdReset()
+{
+    const QByteArray payload =
+        QJsonDocument(QJsonObject{{QStringLiteral("confirm"), true}})
+            .toJson(QJsonDocument::Compact);
+    const uint16_t seq = sendFrame(
+        botcockpit_ui::MSG_CMD_RESET, botcockpit_ui::FLAG_NEED_ACK,
+        std::string(payload.constData(), payload.size()));
+    if (seq) {
+        pending_cmd_name_.insert(seq, QStringLiteral("CMD_RESET"));
+    }
 }
 
 void SocketWorker::onHeartbeatTick()
@@ -202,11 +267,20 @@ void SocketWorker::handleFrame(const botcockpit_ui::Frame& frame)
         }
         break;
     }
-    case MSG_CMD_ACK:
-    case MSG_EVENT_FAULT:
-    case MSG_PARAM_ACK:
+    case MSG_CMD_ACK: {
+        QVariantMap ack = obj.toVariantMap();
+        if (!ack.contains(QStringLiteral("seq")) ||
+            ack.value(QStringLiteral("seq")).isNull()) {
+            ack.insert(QStringLiteral("seq"), frame.seq);
+        }
+        if (!ack.contains(QStringLiteral("cmd"))) {
+            ack.insert(QStringLiteral("cmd"), pending_cmd_name_.value(frame.seq));
+        }
+        pending_cmd_name_.remove(frame.seq);
+        emit cmdAck(ack);
+        break;
+    }
     default:
-        // Week-1 UI only binds state; command pages come later.
         break;
     }
 }

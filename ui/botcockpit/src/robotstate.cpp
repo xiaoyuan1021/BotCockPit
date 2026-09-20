@@ -2,6 +2,31 @@
 
 RobotState::RobotState(QObject* parent) : QObject(parent) {}
 
+void RobotState::setLastCmdAck(const QVariantMap& ack)
+{
+    last_cmd_ok_ = ack.value(QStringLiteral("ok")).toBool();
+    const QString cmd = ack.value(QStringLiteral("cmd")).toString();
+    const QString status = ack.value(QStringLiteral("status")).toString();
+    const QString reason = ack.value(QStringLiteral("reason")).toString();
+    QString text = cmd;
+    if (!text.isEmpty()) {
+        text += QLatin1Char(' ');
+    }
+    text += last_cmd_ok_ ? QStringLiteral("OK") : QStringLiteral("REJECTED");
+    if (!status.isEmpty()) {
+        text += QLatin1String(" · ") + status;
+    }
+    if (!reason.isEmpty() && reason != QLatin1String("null")) {
+        text += QLatin1String(" · ") + reason;
+    }
+    const QVariant seq = ack.value(QStringLiteral("seq"));
+    if (seq.isValid() && !seq.isNull()) {
+        text += QStringLiteral(" · seq=") + seq.toString();
+    }
+    last_cmd_ack_text_ = text;
+    emit lastCmdAckChanged();
+}
+
 void RobotState::setConnecting(bool v)
 {
     if (connecting_ == v) {

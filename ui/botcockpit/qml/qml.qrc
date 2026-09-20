@@ -3,5 +3,6 @@
         <file>Main.qml</file>
         <file>ConnectPage.qml</file>
         <file>DashboardPage.qml</file>
+        <file>ControlPage.qml</file>
     </qresource>
 </RCC>

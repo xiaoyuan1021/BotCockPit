@@ -30,26 +30,38 @@
 | A7 | 文档一致 | PASS | type/flags/seq/JSON 与 PROTOCOL.md v0.1 一致 | |
 | A8 | QML 体验 | PASS | Connect+Dashboard 可用；断线状态正确；状态随仿真刷新 | Qt6.2.4 |
 
-**本周结论**：**第 1 周完成**，进入第 2 周（状态机完善 + Control 页 + launch_testing）。
-
-**未关闭缺陷**：无（第 1 周范围）
-
-**过程记录**：
-- 交叉编译环境污染 ROS2 host 构建 → 注释 `~/.bashrc` 交叉 export，改用 `/opt/ros/humble` + host gcc
-- bridge 自定义 SIGINT 导致无法退出 → 改为 ROS2 默认 shutdown
-- QML 首连 battery=0 → fake_robot configure 后立即 publish；UI 增加 hasRobotState 提示
-- Qt 6.2 无 `qt_standard_project_setup` → CMake 改 AUTOMOC + qrc
-- 静态 review 后 Week1 收尾修复：ESTOP→RESET 不再被 E_ESTOP_ACTIVE 卡死；bridge 按机器人状态新鲜度下发 conn=OFFLINE；NACK reason=timeout；帧 length 上限 64KiB；TCP fd 原子关闭；bridge 周期主动 HEARTBEAT
+**本周结论**：**第 1 周完成**。
 
 ---
 
-## Week 2 待办（来自 code review，未在 Week1 关闭）
+## Week 2 — 2026-09-20 — **自动化通过 / UI 控制待现场点选**
 
-| 优先级 | 项 | 说明 |
-|--------|----|------|
-| P0 | Control 页 + 指令闭环 UI | CMD_MODE/TASK/ESTOP/RESET + 二次确认 |
-| P0 | launch_testing ≥3 条 | 正常任务 / 断线安全 / 急停锁定 |
-| P1 | ESTOP 期间 bridge 不转发运动指令 | §7.4 已在 bridge 加 estop 拒绝 TASK/AUTO，需测试 |
-| P1 | EVENT_FAULT 独立消息 | 当前仅嵌在 state.faults[] |
-| P2 | 协议头去重 / STATE 真增量 DELTA | 减重复与带宽 |
-| P2 | Dashboard last_hb 显示相对时间 | 可用性 |
+编译：`botcockpit_bridge` + `botcockpit_sim` + `ui/botcockpit` 均 BUILD_OK（SSH 至 192.168.9.98）。
+
+| ID | 项 | 结果 | 现象 / 复现 | 备注 |
+|----|----|------|-------------|------|
+| B1 | 状态机 | PASS（launch） | IDLE 可接 goto；ESTOP 任意态；FAULT 见 inject | test_normal + test_estop |
+| B2 | 指令 ACK | PASS（launch） | CMD_* 均回 ACK，seq 匹配；UI 已接 `lastCmdAckText` | |
+| B3 | 急停锁定 | PASS | ESTOP 后 TASK/AUTO 被拒；RESET 无 confirm → `confirm_required`；confirm 后回 IDLE | test_estop_lock |
+| B4 | 断线安全 | PASS | console offline → `control_enabled=false`，RUNNING SAFE 停；恢复后可再控 | test_link_loss_safety |
+| B5 | launch_testing | PASS | 3/3 Passed（normal / estop / link_loss） | `ctest` in build/botcockpit_sim |
+| B6 | 故障注入 | PASS | `tools/inject_fault.py` → `phase=FAULT`；`--clear` 可清 | smoke 日志 |
+| B7 | QML Control | 待现场 | Control 页/二次确认/禁用逻辑已实现；需桌面点击验收 | 下次连接 UI 时勾选 |
+
+**本周结论**：PLAN 第 2 周自动化验收（B1–B6）通过；B7 需用户在 QML Control 页实操确认后勾 PASS。
+
+**复现 launch_testing：**
+```bash
+source /opt/ros/humble/setup.bash
+source ~/ros2_ws/install/setup.bash
+cd ~/ros2_ws/build/botcockpit_sim && ctest --output-on-failure
+```
+
+**未关闭缺陷**：
+1. B7：QML Control 页人工验收（ESTOP/RESET 对话框、控件禁用）
+2. STATE_DELTA 仍为全量快照（WEEK1 允许；第 3 周可改增量）
+
+**实现要点（面试可讲）**：
+- 状态机：ESTOP 最高优先；ERROR→FAULT；WARN→DEGRADED；console 心跳丢失 → SAFE 停
+- bridge 发布 `botcockpit/console` 在线位；无客户端时 robot 禁止新任务
+- Control 页仅调用 C++ `ConnectionController` API；编解码仍在 SocketWorker 线程

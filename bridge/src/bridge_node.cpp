@@ -28,6 +28,8 @@ BridgeNode::BridgeNode(const rclcpp::NodeOptions& options)
 
   cmd_pub_ = create_publisher<std_msgs::msg::String>("botcockpit/cmd",
                                                      rclcpp::QoS(10));
+  console_pub_ = create_publisher<std_msgs::msg::String>("botcockpit/console",
+                                                         rclcpp::QoS(10));
 
   delta_timer_ = create_wall_timer(
       std::chrono::milliseconds(STATE_DELTA_MS),
@@ -130,6 +132,13 @@ void BridgeNode::delta_timer_cb()
 {
   if (server_) {
     server_->broadcast_state_delta();
+  }
+  // PROTOCOL §3: console link state → robot safety (forbid tasks / SAFE stop).
+  if (console_pub_) {
+    const bool online = server_ && server_->client_count() > 0;
+    std_msgs::msg::String msg;
+    msg.data = std::string("{\"online\":") + (online ? "true" : "false") + "}";
+    console_pub_->publish(msg);
   }
 }
 

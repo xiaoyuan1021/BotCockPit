@@ -21,7 +21,6 @@ std::string esc(const std::string& s)
   return out;
 }
 
-// Tiny helpers for command envelope: {"seq":n,"cmd":"...","payload":{...}}
 bool extract_string(const std::string& obj, const std::string& key,
                     std::string& out)
 {
@@ -142,19 +141,112 @@ FakeRobot::~FakeRobot()
   }
 }
 
+bool FakeRobot::has_error_condition() const
+{
+  for (const auto& f : faults_) {
+    if (f.active && f.level == "ERROR") {
+      return true;
+    }
+  }
+  for (const auto& n : nodes_) {
+    if (n.status == "ERROR" || n.status == "LOST") {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool FakeRobot::has_warn_condition() const
+{
+  for (const auto& f : faults_) {
+    if (f.active && f.level == "WARN") {
+      return true;
+    }
+  }
+  for (const auto& n : nodes_) {
+    if (n.status == "WARN") {
+      return true;
+    }
+  }
+  return false;
+}
+
+void FakeRobot::recompute_phase_and_control()
+{
+  // ESTOP highest priority (PROTOCOL §4).
+  if (estop_) {
+    phase_ = "ESTOP";
+    control_enabled_ = false;
+    return;
+  }
+  if (phase_ == "BOOT" || phase_ == "INITIALIZING") {
+    control_enabled_ = false;
+    return;
+  }
+  if (has_error_condition()) {
+    if (phase_ == "RUNNING") {
+      task_status_ = "FAILED";
+    }
+    phase_ = "FAULT";
+    control_enabled_ = false;
+    nodes_[0].status = "ERROR";
+    return;
+  }
+  if (has_warn_condition()) {
+    // Non-critical abnormal → DEGRADED, no new tasks (PROTOCOL phase table).
+    if (phase_ != "RUNNING") {
+      phase_ = "DEGRADED";
+    }
+    control_enabled_ = false;
+    nodes_[0].status = "WARN";
+    return;
+  }
+  nodes_[0].status = "OK";
+  if (phase_ == "FAULT" || phase_ == "DEGRADED" || phase_ == "ESTOP") {
+    // Recovery requires explicit state; tick may leave to IDLE when clean.
+    if (!estop_ && !has_error_condition() && !has_warn_condition()) {
+      phase_ = "IDLE";
+    }
+  }
+  if (phase_ == "IDLE") {
+    control_enabled_ = console_online_;
+  } else if (phase_ == "RUNNING") {
+    control_enabled_ = false;  // no new tasks while busy
+  }
+}
+
+void FakeRobot::apply_safety_stop(const std::string& why)
+{
+  // SAFE stop: halt motion, reject new control until conditions clear.
+  if (task_status_ == "EXECUTING" || task_status_ == "ACCEPTED") {
+    task_status_ = "FAILED";
+  }
+  if (phase_ == "RUNNING") {
+    phase_ = "IDLE";
+  }
+  task_type_.clear();
+  RCLCPP_WARN(get_logger(), "SAFE stop: %s", why.c_str());
+  recompute_phase_and_control();
+  if (!console_online_) {
+    control_enabled_ = false;
+  }
+  publish_state();
+}
+
 CallbackReturn FakeRobot::on_configure(const rclcpp_lifecycle::State&)
 {
   std::lock_guard<std::mutex> lock(mu_);
   phase_ = "INITIALIZING";
   control_enabled_ = false;
   estop_ = false;
+  console_online_ = false;
   battery_ = 100.0;
   task_status_ = "NONE";
   task_id_.clear();
   task_type_.clear();
   clear_faults();
   nodes_[0].status = "OK";
-  configure_tp_ = std::chrono::steady_clock::now();
+  nodes_[1].status = "OK";
 
   state_pub_ = create_publisher<std_msgs::msg::String>(
       "botcockpit/state", rclcpp::QoS(10));
@@ -163,11 +255,12 @@ CallbackReturn FakeRobot::on_configure(const rclcpp_lifecycle::State&)
   cmd_sub_ = create_subscription<std_msgs::msg::String>(
       "botcockpit/cmd", rclcpp::QoS(10),
       std::bind(&FakeRobot::on_cmd, this, std::placeholders::_1));
+  console_sub_ = create_subscription<std_msgs::msg::String>(
+      "botcockpit/console", rclcpp::QoS(10),
+      std::bind(&FakeRobot::on_console, this, std::placeholders::_1));
 
-  // WEEK1: configure 后即可发布状态（activate 前 bridge/QML 也能看到字段）
   publish_state();
-  RCLCPP_INFO(get_logger(),
-              "configured: state publisher ready on botcockpit/state");
+  RCLCPP_INFO(get_logger(), "configured: topics ready");
   return CallbackReturn::SUCCESS;
 }
 
@@ -176,12 +269,10 @@ CallbackReturn FakeRobot::on_activate(const rclcpp_lifecycle::State&)
   {
     std::lock_guard<std::mutex> lock(mu_);
     active_ = true;
-    // Brief INIT then IDLE (week-1 simplified).
     phase_ = "INITIALIZING";
     control_enabled_ = false;
     idle_tp_ = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
     last_tick_tp_ = std::chrono::steady_clock::now();
-    // 立刻发一帧，避免 UI 在首个 tick 前一直显示 0
     publish_state();
   }
   tick_timer_ = create_wall_timer(
@@ -201,7 +292,6 @@ CallbackReturn FakeRobot::on_deactivate(const rclcpp_lifecycle::State&)
   active_ = false;
   control_enabled_ = false;
   phase_ = "INITIALIZING";
-  RCLCPP_INFO(get_logger(), "deactivated");
   return CallbackReturn::SUCCESS;
 }
 
@@ -212,6 +302,7 @@ CallbackReturn FakeRobot::on_cleanup(const rclcpp_lifecycle::State&)
     tick_timer_.reset();
   }
   cmd_sub_.reset();
+  console_sub_.reset();
   state_pub_.reset();
   result_pub_.reset();
   std::lock_guard<std::mutex> lock(mu_);
@@ -223,6 +314,31 @@ CallbackReturn FakeRobot::on_cleanup(const rclcpp_lifecycle::State&)
 CallbackReturn FakeRobot::on_shutdown(const rclcpp_lifecycle::State&)
 {
   return on_cleanup(rclcpp_lifecycle::State());
+}
+
+void FakeRobot::on_console(const std_msgs::msg::String::SharedPtr msg)
+{
+  if (!msg) {
+    return;
+  }
+  bool online = false;
+  extract_bool(msg->data, "online", online);
+  std::lock_guard<std::mutex> lock(mu_);
+  console_online_ = online;
+  if (online) {
+    last_console_ms_ = now_ms();
+    nodes_[1].status = "OK";
+  } else {
+    nodes_[1].status = "LOST";
+    if (phase_ == "RUNNING") {
+      apply_safety_stop("console offline");
+    }
+  }
+  recompute_phase_and_control();
+  if (!console_online_) {
+    control_enabled_ = false;
+  }
+  publish_state();
 }
 
 void FakeRobot::tick()
@@ -238,44 +354,64 @@ void FakeRobot::tick()
   }
   last_tick_tp_ = now;
 
-  // INITIALIZING -> IDLE after short delay
-  if (phase_ == "INITIALIZING" && now >= idle_tp_) {
-    phase_ = "IDLE";
-    control_enabled_ = !estop_;
+  // Console heartbeat freshness (bridge publishes botcockpit/console ~2 Hz).
+  if (console_online_ && last_console_ms_ > 0 &&
+      now_ms() - last_console_ms_ > 3000) {
+    console_online_ = false;
+    nodes_[1].status = "LOST";
+    if (phase_ == "RUNNING") {
+      apply_safety_stop("console heartbeat lost");
+    }
   }
 
-  if (!estop_) {
-    // Simulate idle drift + battery drain
-    if (phase_ == "IDLE") {
-      pose_x_ += 0.1 * dt;  // ~0.1 m/s demo drift, wraps
-      if (pose_x_ > 10.0) {
-        pose_x_ = 0.0;
-      }
-      battery_ -= 0.02 * dt;
-    } else if (phase_ == "RUNNING" && task_type_ == "goto") {
-      const double speed = 0.5;  // m/s
-      const double d = dist(pose_x_, pose_y_, goal_x_, goal_y_);
-      if (d < 0.05) {
-        pose_x_ = goal_x_;
-        pose_y_ = goal_y_;
-        task_status_ = "DONE";
-        phase_ = "IDLE";
-      } else {
-        const double step = speed * dt;
-        const double ratio = (d > 1e-6) ? (step / d) : 1.0;
-        pose_x_ += (goal_x_ - pose_x_) * std::min(1.0, ratio);
-        pose_y_ += (goal_y_ - pose_y_) * std::min(1.0, ratio);
-        pose_yaw_ = std::atan2(goal_y_ - pose_y_, goal_x_ - pose_x_);
-        task_status_ = "EXECUTING";
-      }
-      battery_ -= 0.05 * dt;
+  if (phase_ == "INITIALIZING" && now >= idle_tp_) {
+    phase_ = "IDLE";
+  }
+
+  recompute_phase_and_control();
+
+  // Motion simulation only when RUNNING and not estopped/faulted.
+  if (!estop_ && phase_ == "RUNNING" && task_type_ == "goto") {
+    const double speed = 0.5;
+    const double d = dist(pose_x_, pose_y_, goal_x_, goal_y_);
+    if (d < 0.05) {
+      pose_x_ = goal_x_;
+      pose_y_ = goal_y_;
+      task_status_ = "DONE";
+      phase_ = "IDLE";
+      recompute_phase_and_control();
+    } else {
+      const double step = speed * dt;
+      const double ratio = (d > 1e-6) ? std::min(1.0, step / d) : 1.0;
+      pose_x_ += (goal_x_ - pose_x_) * ratio;
+      pose_y_ += (goal_y_ - pose_y_) * ratio;
+      pose_yaw_ = std::atan2(goal_y_ - pose_y_, goal_x_ - pose_x_);
+      task_status_ = "EXECUTING";
     }
-    if (battery_ < 0.0) {
-      battery_ = 0.0;
-      if (faults_.empty()) {
-        faults_.push_back({"W_BATTERY_LOW", "WARN", "fake_robot",
-                           "battery below threshold", true});
+    battery_ -= 0.05 * dt;
+  } else if (!estop_ && phase_ == "IDLE") {
+    pose_x_ += 0.1 * dt;
+    if (pose_x_ > 10.0) {
+      pose_x_ = 0.0;
+    }
+    battery_ -= 0.02 * dt;
+  }
+
+  if (battery_ < 0.0) {
+    battery_ = 0.0;
+  }
+  if (battery_ < 15.0) {
+    bool has_low = false;
+    for (const auto& f : faults_) {
+      if (f.code == "W_BATTERY_LOW" && f.active) {
+        has_low = true;
+        break;
       }
+    }
+    if (!has_low) {
+      faults_.push_back(
+          {"W_BATTERY_LOW", "WARN", "fake_robot", "battery below 15%", true});
+      recompute_phase_and_control();
     }
   }
 
@@ -290,8 +426,11 @@ std::string FakeRobot::build_state_json() const
     conn = "ESTOP";
   } else if (phase_ == "FAULT") {
     conn = "OFFLINE";
-  } else if (phase_ == "DEGRADED") {
+  } else if (phase_ == "DEGRADED" || !console_online_) {
     conn = "DEGRADED";
+    if (!console_online_) {
+      conn = "OFFLINE";
+    }
   }
 
   oss << "{";
@@ -314,13 +453,13 @@ std::string FakeRobot::build_state_json() const
       << pose_yaw_ << "}";
   oss << ",\"battery\":" << battery_;
   oss << ",\"task\":{\"id\":";
-  if (task_id_.empty() || task_id_ == "null") {
+  if (task_id_.empty()) {
     oss << "null";
   } else {
     oss << "\"" << esc(task_id_) << "\"";
   }
   oss << ",\"type\":";
-  if (task_type_.empty() || task_type_ == "null") {
+  if (task_type_.empty()) {
     oss << "null";
   } else {
     oss << "\"" << esc(task_type_) << "\"";
@@ -385,22 +524,23 @@ void FakeRobot::publish_cmd_result(uint16_t seq, const std::string& cmd,
 
 void FakeRobot::inject_fault(const std::string& detail)
 {
+  faults_.push_back({"E_NODE_TIMEOUT", "ERROR", "fake_robot", detail, true});
   nodes_[0].status = "ERROR";
-  faults_.push_back(
-      {"E_NODE_TIMEOUT", "ERROR", "fake_robot", detail, true});
-  if (phase_ != "ESTOP") {
-    phase_ = "FAULT";
-    control_enabled_ = false;
+  if (task_status_ == "EXECUTING" || task_status_ == "ACCEPTED") {
+    task_status_ = "FAILED";
   }
-  task_status_ = "FAILED";
+  recompute_phase_and_control();
 }
 
 void FakeRobot::clear_faults()
 {
   faults_.clear();
   for (auto& n : nodes_) {
-    if (n.status == "ERROR" || n.status == "WARN") {
-      n.status = "OK";
+    if (n.status == "ERROR" || n.status == "WARN" || n.status == "LOST") {
+      // keep bridge LOST only if console actually offline — restored in on_console
+      if (n.name == "fake_robot") {
+        n.status = "OK";
+      }
     }
   }
 }
@@ -419,15 +559,18 @@ void FakeRobot::on_cmd(const std_msgs::msg::String::SharedPtr msg)
 
   std::lock_guard<std::mutex> lock(mu_);
 
-  // Safety rules (PROTOCOL.md §4): ESTOP / FAULT reject new tasks & AUTO mode.
-  const bool blocked = estop_ || phase_ == "FAULT" || phase_ == "BOOT" ||
-                       phase_ == "INITIALIZING" || phase_ == "DEGRADED";
+  // PROTOCOL §4: ESTOP / FAULT / offline reject tasks & AUTO.
+  const bool blocked = estop_ || phase_ == "FAULT" || phase_ == "DEGRADED" ||
+                       phase_ == "BOOT" || phase_ == "INITIALIZING" ||
+                       !console_online_;
 
-  if (cmd == "CMD_ESTOP") {
+  if (cmd == "CMD_ESTART" || cmd == "CMD_ESTOP") {
     estop_ = true;
     phase_ = "ESTOP";
     control_enabled_ = false;
-    task_status_ = (task_status_ == "EXECUTING") ? "FAILED" : task_status_;
+    if (task_status_ == "EXECUTING" || task_status_ == "ACCEPTED") {
+      task_status_ = "FAILED";
+    }
     bool has_estop_fault = false;
     for (const auto& f : faults_) {
       if (f.code == "E_ESTOP_ACTIVE") {
@@ -439,8 +582,7 @@ void FakeRobot::on_cmd(const std_msgs::msg::String::SharedPtr msg)
       faults_.push_back({"E_ESTOP_ACTIVE", "WARN", "fake_robot",
                          "software estop engaged", true});
     }
-    nodes_[0].status = "OK";  // estop is not node failure
-    publish_cmd_result(seq, cmd, true, "ACCEPTED", "");
+    publish_cmd_result(seq, "CMD_ESTOP", true, "ACCEPTED", "");
     publish_state();
     return;
   }
@@ -451,31 +593,33 @@ void FakeRobot::on_cmd(const std_msgs::msg::String::SharedPtr msg)
       publish_cmd_result(seq, cmd, false, "REJECTED", "confirm_required");
       return;
     }
-    // PROTOCOL §4: ESTOP exits via CMD_RESET when no fault *source* remains.
-    // E_ESTOP_ACTIVE is bookkeeping for the stop itself — clearable.
-    // ERROR-level faults (e.g. injected node error) still block reset.
-    bool has_blocking_fault = false;
+    bool has_blocking = false;
     for (const auto& f : faults_) {
-      if (f.code == "E_ESTOP_ACTIVE") {
-        continue;
+      if (f.code == "E_ESTOP_ACTIVE" || f.code == "W_BATTERY_LOW") {
+        continue;  // symptom / warn, not blocking source
       }
       if (f.level == "ERROR") {
-        has_blocking_fault = true;
+        has_blocking = true;
         break;
       }
     }
-    if (has_blocking_fault) {
+    if (has_blocking) {
       publish_cmd_result(seq, cmd, false, "REJECTED", "phase_busy");
+      publish_state();
       return;
     }
     estop_ = false;
     clear_faults();
+    if (!console_online_) {
+      nodes_[1].status = "LOST";
+    }
     phase_ = "IDLE";
     mode_ = "TELEOP";
     task_status_ = "NONE";
     task_id_.clear();
     task_type_.clear();
-    control_enabled_ = true;
+    recompute_phase_and_control();
+    control_enabled_ = console_online_ && phase_ == "IDLE";
     publish_cmd_result(seq, cmd, true, "ACCEPTED", "");
     publish_state();
     return;
@@ -510,17 +654,12 @@ void FakeRobot::on_cmd(const std_msgs::msg::String::SharedPtr msg)
 
     if (blocked) {
       publish_cmd_result(seq, cmd, false, "REJECTED",
-                         estop_ ? "estop_active" : "phase_busy");
+                         estop_ ? "estop_active" : "phase_busy", task_id);
       return;
     }
     if (phase_ == "RUNNING") {
       publish_cmd_result(seq, cmd, false, "REJECTED", "phase_busy", task_id);
       return;
-    }
-    if (mode_ != "AUTO" && type == "goto") {
-      // Allow goto in TELEOP for week-1 sim convenience? PROTOCOL: new tasks
-      // allowed in IDLE if mode suitable. goto is AUTO-oriented; still accept
-      // in TELEOP for lab debug — record decision in ACCEPTANCE.
     }
 
     if (type == "goto") {
@@ -531,8 +670,7 @@ void FakeRobot::on_cmd(const std_msgs::msg::String::SharedPtr msg)
       if (task_id.empty()) {
         task_id = "T-sim";
       }
-      if (!task_id_.empty() && task_id_ == task_id &&
-          task_status_ == "DONE") {
+      if (!task_id_.empty() && task_id_ == task_id && task_status_ == "DONE") {
         publish_cmd_result(seq, cmd, true, "DONE", "", task_id);
         return;
       }
@@ -542,6 +680,7 @@ void FakeRobot::on_cmd(const std_msgs::msg::String::SharedPtr msg)
       goal_x_ = x;
       goal_y_ = y;
       phase_ = "RUNNING";
+      control_enabled_ = false;
       publish_cmd_result(seq, cmd, true, "ACCEPTED", "", task_id);
       publish_state();
       return;
@@ -550,22 +689,26 @@ void FakeRobot::on_cmd(const std_msgs::msg::String::SharedPtr msg)
       if (phase_ == "RUNNING") {
         task_status_ = "ACCEPTED";
         phase_ = "IDLE";
+        recompute_phase_and_control();
         publish_cmd_result(seq, cmd, true, "ACCEPTED", "", task_id_);
       } else {
-        publish_cmd_result(seq, cmd, false, "REJECTED", "unknown_task",
-                           task_id);
+        publish_cmd_result(seq, cmd, false, "REJECTED", "unknown_task", task_id);
       }
+      publish_state();
       return;
     }
     if (type == "resume") {
-      if (!task_id_.empty() && task_type_ == "goto") {
+      if (!task_id_.empty() && task_type_ == "goto" && !estop_ &&
+          phase_ == "IDLE" && console_online_ && !has_error_condition()) {
         phase_ = "RUNNING";
         task_status_ = "EXECUTING";
+        control_enabled_ = false;
         publish_cmd_result(seq, cmd, true, "ACCEPTED", "", task_id_);
       } else {
-        publish_cmd_result(seq, cmd, false, "REJECTED", "unknown_task",
-                           task_id);
+        publish_cmd_result(seq, cmd, false, "REJECTED",
+                           estop_ ? "estop_active" : "unknown_task", task_id);
       }
+      publish_state();
       return;
     }
     if (type == "cancel") {
@@ -575,6 +718,7 @@ void FakeRobot::on_cmd(const std_msgs::msg::String::SharedPtr msg)
       if (phase_ == "RUNNING") {
         phase_ = "IDLE";
       }
+      recompute_phase_and_control();
       publish_cmd_result(seq, cmd, true, "ACCEPTED", "");
       publish_state();
       return;
@@ -594,10 +738,14 @@ void FakeRobot::on_cmd(const std_msgs::msg::String::SharedPtr msg)
 
   if (cmd == "CLEAR_FAULT" || cmd == "CMD_CLEAR_FAULT") {
     clear_faults();
-    if (phase_ == "FAULT") {
-      phase_ = "IDLE";
-      control_enabled_ = !estop_;
+    if (!console_online_) {
+      nodes_[1].status = "LOST";
     }
+    recompute_phase_and_control();
+    if (phase_ == "FAULT" && !has_error_condition()) {
+      phase_ = "IDLE";
+    }
+    control_enabled_ = console_online_ && phase_ == "IDLE" && !estop_;
     publish_cmd_result(seq, cmd, true, "ACCEPTED", "");
     publish_state();
     return;

@@ -41,6 +41,7 @@ class BridgeNode : public rclcpp::Node {
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr state_sub_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr cmd_result_sub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr cmd_pub_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr console_pub_;
   rclcpp::TimerBase::SharedPtr delta_timer_;
 
   mutable std::mutex state_mu_;

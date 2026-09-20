@@ -33,6 +33,8 @@ class RobotState : public QObject
     Q_PROPERTY(QString taskStatus READ taskStatus NOTIFY taskChanged)
     Q_PROPERTY(QString faultsSummary READ faultsSummary NOTIFY faultsChanged)
     Q_PROPERTY(int faultCount READ faultCount NOTIFY faultsChanged)
+    Q_PROPERTY(QString lastCmdAckText READ lastCmdAckText NOTIFY lastCmdAckChanged)
+    Q_PROPERTY(bool lastCmdOk READ lastCmdOk NOTIFY lastCmdAckChanged)
 
 public:
     explicit RobotState(QObject* parent = nullptr);
@@ -61,6 +63,10 @@ public:
     QString taskStatus() const { return task_status_; }
     QString faultsSummary() const { return faults_summary_; }
     int faultCount() const { return fault_count_; }
+    QString lastCmdAckText() const { return last_cmd_ack_text_; }
+    bool lastCmdOk() const { return last_cmd_ok_; }
+
+    void setLastCmdAck(const QVariantMap& ack);
 
     void setConnecting(bool v);
     void setConnected(bool v);
@@ -91,6 +97,7 @@ signals:
     void stateTsMsChanged();
     void taskChanged();
     void faultsChanged();
+    void lastCmdAckChanged();
 
 private:
     bool connected_ = false;
@@ -117,4 +124,6 @@ private:
     QString task_status_ = QStringLiteral("NONE");
     QString faults_summary_;
     int fault_count_ = 0;
+    QString last_cmd_ack_text_;
+    bool last_cmd_ok_ = false;
 };

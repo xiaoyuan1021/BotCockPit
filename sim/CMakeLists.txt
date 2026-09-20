@@ -32,4 +32,13 @@ install(TARGETS fake_robot
   DESTINATION lib/${PROJECT_NAME}
 )
 
+if(BUILD_TESTING)
+  find_package(launch_testing_ament_cmake QUIET)
+  if(launch_testing_ament_cmake_FOUND)
+    add_launch_test(test/test_normal_task.py TIMEOUT 60)
+    add_launch_test(test/test_estop_lock.py TIMEOUT 60)
+    add_launch_test(test/test_link_loss_safety.py TIMEOUT 60)
+  endif()
+endif()
+
 ament_package()

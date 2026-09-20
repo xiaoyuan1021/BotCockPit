@@ -19,6 +19,14 @@ ConnectionController::ConnectionController(RobotState* state,
             &SocketWorker::connectToHost);
     connect(this, &ConnectionController::stopWorker, worker_,
             &SocketWorker::disconnectFromHost);
+    connect(this, &ConnectionController::workerCmdMode, worker_,
+            &SocketWorker::sendCmdMode);
+    connect(this, &ConnectionController::workerCmdTask, worker_,
+            &SocketWorker::sendCmdTask);
+    connect(this, &ConnectionController::workerCmdEstop, worker_,
+            &SocketWorker::sendCmdEstop);
+    connect(this, &ConnectionController::workerCmdReset, worker_,
+            &SocketWorker::sendCmdReset);
 
     connect(worker_, &SocketWorker::connected, this,
             &ConnectionController::onConnected, Qt::QueuedConnection);
@@ -32,6 +40,8 @@ ConnectionController::ConnectionController(RobotState* state,
             &ConnectionController::onNodes, Qt::QueuedConnection);
     connect(worker_, &SocketWorker::rttUpdated, this,
             &ConnectionController::onRtt, Qt::QueuedConnection);
+    connect(worker_, &SocketWorker::cmdAck, this,
+            &ConnectionController::onCmdAck, Qt::QueuedConnection);
     connect(worker_, &SocketWorker::errorOccurred, this,
             &ConnectionController::onError, Qt::QueuedConnection);
 
@@ -68,6 +78,46 @@ void ConnectionController::connectToServer(const QString& host, int port)
 void ConnectionController::disconnectFromServer()
 {
     emit stopWorker();
+}
+
+void ConnectionController::cmdMode(const QString& mode)
+{
+    if (state_ && !state_->connected()) {
+        return;
+    }
+    emit workerCmdMode(mode);
+}
+
+void ConnectionController::cmdTaskGoto(const QString& taskId, double x, double y)
+{
+    if (state_ && !state_->connected()) {
+        return;
+    }
+    emit workerCmdTask(taskId, QStringLiteral("goto"), x, y, 30.0);
+}
+
+void ConnectionController::cmdTaskSimple(const QString& type)
+{
+    if (state_ && !state_->connected()) {
+        return;
+    }
+    emit workerCmdTask(QString(), type, 0.0, 0.0, 0.0);
+}
+
+void ConnectionController::cmdEstop(const QString& reason)
+{
+    if (state_ && !state_->connected()) {
+        return;
+    }
+    emit workerCmdEstop(reason);
+}
+
+void ConnectionController::cmdReset()
+{
+    if (state_ && !state_->connected()) {
+        return;
+    }
+    emit workerCmdReset();
 }
 
 void ConnectionController::onConnected()
@@ -126,6 +176,13 @@ void ConnectionController::onRtt(int ms)
 {
     if (state_) {
         state_->setHeartbeatRtt(ms);
+    }
+}
+
+void ConnectionController::onCmdAck(const QVariantMap& ack)
+{
+    if (state_) {
+        state_->setLastCmdAck(ack);
     }
 }
 

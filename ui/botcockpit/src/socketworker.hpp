@@ -22,6 +22,11 @@ public:
 public slots:
     void connectToHost(const QString& host, int port);
     void disconnectFromHost();
+    void sendCmdMode(const QString& mode);
+    void sendCmdTask(const QString& taskId, const QString& type, double x,
+                     double y, double timeoutS);
+    void sendCmdEstop(const QString& reason);
+    void sendCmdReset();
 
 signals:
     void connected();
@@ -30,6 +35,7 @@ signals:
     void stateUpdated(const QVariantMap& state);
     void nodesUpdated(const QVariantList& nodes);
     void rttUpdated(int ms);
+    void cmdAck(const QVariantMap& ack);
     void errorOccurred(const QString& message);
 
 private slots:
@@ -39,7 +45,7 @@ private slots:
     void onHeartbeatTick();
 
 private:
-    void sendFrame(uint8_t type, uint8_t flags, const std::string& payload);
+    uint16_t sendFrame(uint8_t type, uint8_t flags, const std::string& payload);
     void handleFrame(const botcockpit_ui::Frame& frame);
     void failAndClose(const QString& message);
     static uint64_t nowMs();
@@ -50,6 +56,7 @@ private:
     botcockpit_ui::FrameDecoder decoder_;
     uint16_t next_seq_ = 1;
     QHash<quint16, qint64> hb_send_ts_;
+    QHash<quint16, QString> pending_cmd_name_;
     qint64 last_rx_ms_ = 0;
     bool hello_sent_ = false;
     bool hello_ok_ = false;

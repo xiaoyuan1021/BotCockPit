@@ -16,9 +16,9 @@ namespace botcockpit_sim {
 using CallbackReturn =
     rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
 
-// Week-1 fake robot:
-//   BOOT -> INITIALIZING -> IDLE -> RUNNING(goto) -> IDLE
-// ESTOP is a high-priority flag; full FAULT rules come in week 2.
+// PROTOCOL.md §4 state machine (week 2):
+//   BOOT -> INITIALIZING -> IDLE ⇄ RUNNING -> FAULT/DEGRADED
+//   ESTOP highest priority; CMD_RESET exits when no ERROR fault source.
 class FakeRobot : public rclcpp_lifecycle::LifecycleNode {
  public:
   FakeRobot();
@@ -38,7 +38,7 @@ class FakeRobot : public rclcpp_lifecycle::LifecycleNode {
 
   struct FaultItem {
     std::string code;
-    std::string level;
+    std::string level;  // INFO/WARN/ERROR
     std::string node;
     std::string detail;
     bool active = true;
@@ -46,6 +46,7 @@ class FakeRobot : public rclcpp_lifecycle::LifecycleNode {
 
   void tick();
   void on_cmd(const std_msgs::msg::String::SharedPtr msg);
+  void on_console(const std_msgs::msg::String::SharedPtr msg);
   void publish_state();
   void publish_cmd_result(uint16_t seq, const std::string& cmd, bool ok,
                           const std::string& status,
@@ -54,6 +55,10 @@ class FakeRobot : public rclcpp_lifecycle::LifecycleNode {
   std::string build_state_json() const;
   void inject_fault(const std::string& detail);
   void clear_faults();
+  void apply_safety_stop(const std::string& why);
+  void recompute_phase_and_control();
+  bool has_error_condition() const;
+  bool has_warn_condition() const;
   static uint64_t now_ms();
   static double dist(double x0, double y0, double x1, double y1);
 
@@ -61,13 +66,17 @@ class FakeRobot : public rclcpp_lifecycle::LifecycleNode {
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr state_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr result_pub_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr cmd_sub_;
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr console_sub_;
 
   mutable std::mutex mu_;
   bool active_ = false;
-  std::string phase_ = "BOOT";  // BOOT/INITIALIZING/IDLE/RUNNING/ESTOP/FAULT
+  // BOOT/INITIALIZING/IDLE/RUNNING/DEGRADED/FAULT/ESTOP
+  std::string phase_ = "BOOT";
   std::string mode_ = "TELEOP";
   bool estop_ = false;
   bool control_enabled_ = false;
+  bool console_online_ = false;
+  uint64_t last_console_ms_ = 0;
 
   double pose_x_ = 0.0;
   double pose_y_ = 0.0;
@@ -76,16 +85,15 @@ class FakeRobot : public rclcpp_lifecycle::LifecycleNode {
 
   std::string task_id_;
   std::string task_type_;
-  std::string task_status_ = "NONE";  // NONE/ACCEPTED/EXECUTING/DONE/FAILED
+  std::string task_status_ = "NONE";
   double goal_x_ = 0.0;
   double goal_y_ = 0.0;
 
   std::vector<NodeHealth> nodes_;
   std::vector<FaultItem> faults_;
 
-  std::chrono::steady_clock::time_point configure_tp_;
-  std::chrono::steady_clock::time_point idle_tp_;
-  std::chrono::steady_clock::time_point last_tick_tp_;
+  std::chrono::steady_clock::time_point idle_tp_{};
+  std::chrono::steady_clock::time_point last_tick_tp_{};
 };
 
 }  // namespace botcockpit_sim

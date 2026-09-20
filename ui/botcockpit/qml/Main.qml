@@ -4,8 +4,8 @@ import QtQuick.Layouts
 
 ApplicationWindow {
     id: root
-    width: 960
-    height: 640
+    width: 1000
+    height: 680
     visible: true
     title: qsTr("BotCockpit — ROS2 Robot Console")
 
@@ -30,6 +30,7 @@ ApplicationWindow {
                 background: Item {}
                 TabButton { text: qsTr("Connect") }
                 TabButton { text: qsTr("Dashboard") }
+                TabButton { text: qsTr("Control") }
                 onCurrentIndexChanged: root.currentPage = currentIndex
             }
 
@@ -38,6 +39,15 @@ ApplicationWindow {
                       ? (qsTr("ONLINE") + " · RTT " + robotState.heartbeatRttMs + " ms")
                       : (robotState.connecting ? qsTr("CONNECTING…") : qsTr("OFFLINE"))
                 color: robotState.connected ? "#1b7f3a" : "#8a1f1f"
+            }
+
+            Label {
+                text: robotState.estop ? qsTr("ESTOP")
+                     : (robotState.phase + " · " + (robotState.controlEnabled
+                        ? qsTr("ctl on") : qsTr("ctl off")))
+                font.bold: true
+                color: robotState.estop ? "#8a1f1f"
+                     : (robotState.controlEnabled ? "#1b7f3a" : palette.text)
             }
         }
     }
@@ -48,6 +58,7 @@ ApplicationWindow {
 
         ConnectPage {}
         DashboardPage {}
+        ControlPage {}
     }
 
     footer: ToolBar {
