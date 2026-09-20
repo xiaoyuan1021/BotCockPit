@@ -46,10 +46,11 @@ class TcpServer {
 
  private:
   struct Client {
-    int fd = -1;
+    std::atomic<int> fd{-1};
     FrameDecoder decoder;
     uint64_t last_rx_ms = 0;
     uint64_t last_hb_rx_ms = 0;
+    uint64_t last_hb_tx_ms = 0;
     bool hello_ok = false;
     std::mutex send_mu;
   };
@@ -60,6 +61,7 @@ class TcpServer {
   bool send_frame(const std::shared_ptr<Client>& client, uint8_t type,
                   uint8_t flags, uint16_t seq, const std::string& payload);
   void remove_client(int fd);
+  void remove_client(int fd, const std::shared_ptr<Client>& client);
   void heartbeat_watchdog();
   std::string inject_runtime_fields(const std::string& state_json,
                                     const std::string& conn_value);

@@ -15,7 +15,9 @@ struct Frame {
 
 // Frame layout (little-endian):
 //   length:u32 | type:u8 | flags:u8 | seq:u16 | payload:bytes
-// length counts from type through end of payload (min 4).
+// length counts from type through end of payload (min 4, max kMaxFrameLength).
+constexpr uint32_t kMinFrameLength = 4;
+constexpr uint32_t kMaxFrameLength = 64u * 1024u;
 std::vector<uint8_t> encode_frame(uint8_t type, uint8_t flags, uint16_t seq,
                                   const std::string& payload);
 

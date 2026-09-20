@@ -34,6 +34,9 @@ struct Frame {
     std::string payload;
 };
 
+constexpr uint32_t kMinFrameLength = 4;
+constexpr uint32_t kMaxFrameLength = 64u * 1024u;
+
 std::vector<uint8_t> encode_frame(uint8_t type, uint8_t flags, uint16_t seq,
                                   const std::string& payload);
 

@@ -42,7 +42,8 @@ bool FrameDecoder::next(Frame& out)
                           (static_cast<uint32_t>(buf_[1]) << 8) |
                           (static_cast<uint32_t>(buf_[2]) << 16) |
                           (static_cast<uint32_t>(buf_[3]) << 24);
-  if (length < 4) {
+  if (length < kMinFrameLength || length > kMaxFrameLength) {
+    // Corrupt/hostile length — reset stream rather than grow without bound.
     buf_.clear();
     return false;
   }

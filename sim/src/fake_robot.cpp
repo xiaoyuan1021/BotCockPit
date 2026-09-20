@@ -428,8 +428,17 @@ void FakeRobot::on_cmd(const std_msgs::msg::String::SharedPtr msg)
     phase_ = "ESTOP";
     control_enabled_ = false;
     task_status_ = (task_status_ == "EXECUTING") ? "FAILED" : task_status_;
-    faults_.push_back({"E_ESTOP_ACTIVE", "WARN", "fake_robot",
-                       "software estop engaged", true});
+    bool has_estop_fault = false;
+    for (const auto& f : faults_) {
+      if (f.code == "E_ESTOP_ACTIVE") {
+        has_estop_fault = true;
+        break;
+      }
+    }
+    if (!has_estop_fault) {
+      faults_.push_back({"E_ESTOP_ACTIVE", "WARN", "fake_robot",
+                         "software estop engaged", true});
+    }
     nodes_[0].status = "OK";  // estop is not node failure
     publish_cmd_result(seq, cmd, true, "ACCEPTED", "");
     publish_state();
@@ -442,11 +451,23 @@ void FakeRobot::on_cmd(const std_msgs::msg::String::SharedPtr msg)
       publish_cmd_result(seq, cmd, false, "REJECTED", "confirm_required");
       return;
     }
-    if (!faults_.empty()) {
-      publish_cmd_result(seq, cmd, false, "REJECTED", "estop_active");
+    // PROTOCOL §4: ESTOP exits via CMD_RESET when no fault *source* remains.
+    // E_ESTOP_ACTIVE is bookkeeping for the stop itself — clearable.
+    // ERROR-level faults (e.g. injected node error) still block reset.
+    bool has_blocking_fault = false;
+    for (const auto& f : faults_) {
+      if (f.code == "E_ESTOP_ACTIVE") {
+        continue;
+      }
+      if (f.level == "ERROR") {
+        has_blocking_fault = true;
+        break;
+      }
+    }
+    if (has_blocking_fault) {
+      publish_cmd_result(seq, cmd, false, "REJECTED", "phase_busy");
       return;
     }
-    // No active faults -> leave ESTOP/FAULT to IDLE
     estop_ = false;
     clear_faults();
     phase_ = "IDLE";

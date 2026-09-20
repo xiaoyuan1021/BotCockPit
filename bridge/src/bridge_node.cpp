@@ -49,10 +49,7 @@ void BridgeNode::log(const std::string& line)
 bool BridgeNode::start_tcp(int port)
 {
   server_ = std::make_unique<TcpServer>(
-      [this]() {
-        std::lock_guard<std::mutex> lock(state_mu_);
-        return robot_state_json_;
-      },
+      [this]() { return state_for_tcp(); },
       [this](const std::string& cmd, uint16_t seq, const std::string& payload) {
         return handle_command(cmd, seq, payload);
       },
@@ -66,6 +63,31 @@ void BridgeNode::stop_tcp()
     server_->stop();
     server_.reset();
   }
+}
+
+bool BridgeNode::robot_state_fresh() const
+{
+  const uint64_t last = last_robot_state_ms_.load();
+  const uint64_t now = now_ms();
+  return last > 0 && (now - last) < static_cast<uint64_t>(HB_TIMEOUT_MS);
+}
+
+std::string BridgeNode::state_for_tcp() const
+{
+  const uint64_t now = now_ms();
+  if (!robot_state_fresh()) {
+    // PROTOCOL §5.4: robot gone → conn=OFFLINE, control disabled.
+    std::ostringstream oss;
+    oss << "{\"ts_ms\":" << now
+        << ",\"conn\":\"OFFLINE\",\"mode\":\"TELEOP\",\"phase\":\"BOOT\""
+        << ",\"heartbeat_rtt_ms\":0,\"nodes\":[]"
+        << ",\"pose\":{\"x\":0,\"y\":0,\"yaw\":0},\"battery\":0"
+        << ",\"task\":{\"id\":null,\"type\":null,\"status\":\"NONE\"}"
+        << ",\"faults\":[],\"estop\":false,\"control_enabled\":false}";
+    return oss.str();
+  }
+  std::lock_guard<std::mutex> lock(state_mu_);
+  return robot_state_json_;
 }
 
 void BridgeNode::on_robot_state(const std_msgs::msg::String::SharedPtr msg)
@@ -115,23 +137,34 @@ std::string BridgeNode::handle_command(const std::string& cmd_name,
                                        uint16_t seq,
                                        const std::string& payload)
 {
-  const uint64_t now = now_ms();
-  const uint64_t last_state = last_robot_state_ms_.load();
-  const bool robot_recent =
-      last_state > 0 && (now - last_state) < static_cast<uint64_t>(HB_TIMEOUT_MS);
-
-  // Week-1 safety: ESTOP is always forwarded when publisher exists.
-  // Other commands: NACK if robot state is stale/missing.
-  if (cmd_name != "CMD_ESTOP" && !robot_recent) {
+  // Week-1 safety: ESTOP is always forwarded; other cmds need fresh robot state.
+  if (cmd_name != "CMD_ESTOP" && !robot_state_fresh()) {
     return std::string("{\"seq\":") + std::to_string(seq) +
            ",\"ok\":false,\"cmd\":\"" + cmd_name +
-           "\",\"status\":\"REJECTED\",\"reason\":\"not_implemented\"}";
+           "\",\"status\":\"REJECTED\",\"reason\":\"timeout\"}";
   }
 
   if (!cmd_pub_) {
     return std::string("{\"seq\":") + std::to_string(seq) +
            ",\"ok\":false,\"cmd\":\"" + cmd_name +
            "\",\"status\":\"REJECTED\",\"reason\":\"not_implemented\"}";
+  }
+
+  // PROTOCOL §7.4: do not forward motion tasks while robot reports estop.
+  if (cmd_name == "CMD_TASK" || (cmd_name == "CMD_MODE" &&
+                                 payload.find("\"AUTO\"") != std::string::npos)) {
+    std::string snap;
+    {
+      std::lock_guard<std::mutex> lock(state_mu_);
+      snap = robot_state_json_;
+    }
+    bool estop = false;
+    json::get_bool(snap, "estop", estop);
+    if (estop) {
+      return std::string("{\"seq\":") + std::to_string(seq) +
+             ",\"ok\":false,\"cmd\":\"" + cmd_name +
+             "\",\"status\":\"REJECTED\",\"reason\":\"estop_active\"}";
+    }
   }
 
   {
@@ -142,7 +175,6 @@ std::string BridgeNode::handle_command(const std::string& cmd_name,
   }
 
   std_msgs::msg::String out;
-  // ROS-side envelope: seq + cmd + original payload fields merged loosely.
   std::ostringstream oss;
   oss << "{\"seq\":" << seq << ",\"cmd\":\"" << json::escape(cmd_name)
       << "\",\"payload\":" << (payload.empty() ? "null" : payload) << "}";

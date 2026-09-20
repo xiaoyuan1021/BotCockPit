@@ -311,18 +311,25 @@ class ClientSession(threading.Thread):
                 if self.hello_ok and time.time() - self.last_hb > HB_TIMEOUT_MS / 1000.0:
                     print(f"[tcp] heartbeat timeout {self.addr}")
                     break
+                if (not self.hello_ok) and (time.time() - self.last_hb > 6.0):
+                    print(f"[tcp] HELLO timeout {self.addr}")
+                    break
                 try:
                     chunk = self.sock.recv(4096)
                 except socket.timeout:
-                    chunk = b""
-                if chunk:
-                    self.last_hb = time.time()
-                    self.rx.extend(chunk)
-                    frames, self.rx = try_decode_frames(self.rx)
-                    for fr in frames:
-                        self.handle(*fr)
-                elif chunk == b"" and not self.alive:
+                    chunk = None
+                except OSError:
                     break
+                if chunk is None:
+                    continue
+                if chunk == b"":
+                    # peer closed
+                    break
+                self.last_hb = time.time()
+                self.rx.extend(chunk)
+                frames, self.rx = try_decode_frames(self.rx)
+                for fr in frames:
+                    self.handle(*fr)
         finally:
             self.alive = False
             try:

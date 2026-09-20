@@ -60,6 +60,10 @@ def encode_frame(msg_type: int, flags: int, seq: int, payload: bytes) -> bytes:
     return header + payload
 
 
+MIN_FRAME_LEN = 4
+MAX_FRAME_LEN = 64 * 1024
+
+
 def try_decode_frames(buffer: bytearray) -> Tuple[List[Tuple[int, int, int, bytes]], bytearray]:
     """Extract complete frames from a sticky TCP buffer."""
     frames: List[Tuple[int, int, int, bytes]] = []
@@ -67,7 +71,7 @@ def try_decode_frames(buffer: bytearray) -> Tuple[List[Tuple[int, int, int, byte
         if len(buffer) < 4:
             break
         (length,) = struct.unpack_from("<I", buffer, 0)
-        if length < 4:
+        if length < MIN_FRAME_LEN or length > MAX_FRAME_LEN:
             # protocol error — drop buffer
             return frames, bytearray()
         if len(buffer) < 4 + length:

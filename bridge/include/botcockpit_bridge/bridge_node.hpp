@@ -23,6 +23,10 @@ class BridgeNode : public rclcpp::Node {
   bool start_tcp(int port);
   void stop_tcp();
 
+  // JSON for TCP clients: ONLINE/ESTOP/... from robot when fresh, else OFFLINE.
+  std::string state_for_tcp() const;
+  bool robot_state_fresh() const;
+
  private:
   void on_robot_state(const std_msgs::msg::String::SharedPtr msg);
   void on_cmd_result(const std_msgs::msg::String::SharedPtr msg);
@@ -39,7 +43,7 @@ class BridgeNode : public rclcpp::Node {
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr cmd_pub_;
   rclcpp::TimerBase::SharedPtr delta_timer_;
 
-  std::mutex state_mu_;
+  mutable std::mutex state_mu_;
   std::string robot_state_json_{"{}"};
   std::atomic<uint64_t> last_robot_state_ms_{0};
 

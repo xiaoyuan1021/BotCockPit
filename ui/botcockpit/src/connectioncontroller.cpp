@@ -40,9 +40,15 @@ ConnectionController::ConnectionController(RobotState* state,
 
 ConnectionController::~ConnectionController()
 {
-    emit stopWorker();
-    worker_thread_.quit();
-    worker_thread_.wait(3000);
+    if (worker_thread_.isRunning() && worker_) {
+        QMetaObject::invokeMethod(worker_, "disconnectFromHost",
+                                  Qt::BlockingQueuedConnection);
+        worker_thread_.quit();
+        if (!worker_thread_.wait(3000)) {
+            worker_thread_.requestInterruption();
+            worker_thread_.wait(1000);
+        }
+    }
 }
 
 void ConnectionController::connectToServer(const QString& host, int port)

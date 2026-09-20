@@ -102,10 +102,12 @@ void TcpServer::stop()
   {
     std::lock_guard<std::mutex> lock(clients_mu_);
     for (auto& c : clients_) {
-      if (c && c->fd >= 0) {
-        ::shutdown(c->fd, SHUT_RDWR);
-        ::close(c->fd);
-        c->fd = -1;
+      if (c) {
+        const int cfd = c->fd.exchange(-1);
+        if (cfd >= 0) {
+          ::shutdown(cfd, SHUT_RDWR);
+          ::close(cfd);
+        }
       }
     }
   }
@@ -129,7 +131,7 @@ size_t TcpServer::client_count() const
   std::lock_guard<std::mutex> lock(clients_mu_);
   size_t n = 0;
   for (const auto& c : clients_) {
-    if (c && c->fd >= 0 && c->hello_ok) {
+    if (c && c->fd.load() >= 0 && c->hello_ok) {
       ++n;
     }
   }
@@ -153,9 +155,10 @@ void TcpServer::accept_loop()
     ::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof(yes));
 
     auto client = std::make_shared<Client>();
-    client->fd = fd;
+    client->fd.store(fd);
     client->last_rx_ms = now_ms();
     client->last_hb_rx_ms = client->last_rx_ms;
+    client->last_hb_tx_ms = client->last_rx_ms;
     {
       std::lock_guard<std::mutex> lock(clients_mu_);
       clients_.push_back(client);
@@ -173,13 +176,17 @@ void TcpServer::accept_loop()
 void TcpServer::client_loop(std::shared_ptr<Client> client)
 {
   uint8_t buf[kReadChunk];
-  while (running_.load() && client->fd >= 0) {
-    const ssize_t n = ::recv(client->fd, buf, sizeof(buf), 0);
+  while (running_.load()) {
+    const int fd = client->fd.load();
+    if (fd < 0) {
+      break;
+    }
+    const ssize_t n = ::recv(fd, buf, sizeof(buf), 0);
     if (n == 0) {
       break;
     }
     if (n < 0) {
-      if (!running_.load()) {
+      if (!running_.load() || client->fd.load() < 0) {
         break;
       }
       continue;
@@ -189,17 +196,16 @@ void TcpServer::client_loop(std::shared_ptr<Client> client)
     Frame frame;
     while (client->decoder.next(frame)) {
       handle_frame(client, frame);
-      if (client->fd < 0) {
+      if (client->fd.load() < 0) {
         break;
       }
     }
   }
-  const int fd = client->fd;
-  client->fd = -1;
-  remove_client(fd);
+  const int fd = client->fd.exchange(-1);
   if (fd >= 0) {
     ::close(fd);
   }
+  remove_client(-1, client);
   if (log_) {
     log_("[tcp] client disconnected");
   }
@@ -207,12 +213,17 @@ void TcpServer::client_loop(std::shared_ptr<Client> client)
 
 void TcpServer::remove_client(int fd)
 {
-  if (fd < 0) {
-    return;
-  }
+  remove_client(fd, nullptr);
+}
+
+void TcpServer::remove_client(int fd, const std::shared_ptr<Client>& client)
+{
   std::lock_guard<std::mutex> lock(clients_mu_);
   for (auto it = clients_.begin(); it != clients_.end(); ++it) {
-    if (*it && (*it)->fd == fd) {
+    if (!*it) {
+      continue;
+    }
+    if ((client && *it == client) || (fd >= 0 && (*it)->fd.load() == fd)) {
       clients_.erase(it);
       break;
     }
@@ -223,7 +234,11 @@ bool TcpServer::send_frame(const std::shared_ptr<Client>& client, uint8_t type,
                            uint8_t flags, uint16_t seq,
                            const std::string& payload)
 {
-  if (!client || client->fd < 0) {
+  if (!client) {
+    return false;
+  }
+  const int fd = client->fd.load();
+  if (fd < 0) {
     return false;
   }
   const auto bytes = encode_frame(type, flags, seq, payload);
@@ -231,7 +246,7 @@ bool TcpServer::send_frame(const std::shared_ptr<Client>& client, uint8_t type,
   size_t off = 0;
   while (off < bytes.size()) {
     const ssize_t n =
-        ::send(client->fd, bytes.data() + off, bytes.size() - off, MSG_NOSIGNAL);
+        ::send(fd, bytes.data() + off, bytes.size() - off, MSG_NOSIGNAL);
     if (n <= 0) {
       return false;
     }
@@ -243,12 +258,11 @@ bool TcpServer::send_frame(const std::shared_ptr<Client>& client, uint8_t type,
 std::string TcpServer::inject_runtime_fields(const std::string& state_json,
                                              const std::string& conn_value)
 {
-  // Week-1: bridge may send full state as DELTA; ensure conn/rtt present.
-  std::string body = state_json;
-  if (body.empty() || body[0] != '{') {
-    body = "{}";
+  // Prefer robot/bridge-computed state as-is when it already has conn.
+  if (!state_json.empty() && state_json.find("\"conn\"") != std::string::npos) {
+    return state_json;
   }
-  // Strip trailing '}' and merge runtime keys if missing.
+  std::string body = state_json.empty() || state_json[0] != '{' ? "{}" : state_json;
   if (!body.empty() && body.back() == '}') {
     body.pop_back();
   }
@@ -256,18 +270,7 @@ std::string TcpServer::inject_runtime_fields(const std::string& state_json,
     body += ",";
   }
   body += "\"conn\":\"" + json::escape(conn_value) + "\"";
-  body += ",\"heartbeat_rtt_ms\":0";
-  // Remove duplicate keys if state already has them — keep last (ours) for
-  // week-1 simplicity: clients typically take first match; rebuild cleanly
-  // by preferring source keys. We only append if not present.
-  // Rebuild: if original already had conn, JSON parsers may use first value.
-  // So construct a thin wrapper only when needed.
-  body += "}";
-  // Prefer deterministic object: if original had conn, keep original by
-  // sending original when it already contains "\"conn\"".
-  if (state_json.find("\"conn\"") != std::string::npos) {
-    return state_json;
-  }
+  body += ",\"heartbeat_rtt_ms\":0}";
   return body;
 }
 
@@ -290,22 +293,22 @@ void TcpServer::handle_frame(const std::shared_ptr<Client>& client,
       json::get_string(frame.payload, "proto_max", proto_max);
       const bool ok = (proto_min == PROTO_VERSION) || (proto_max == PROTO_VERSION) ||
                       (proto_min.empty() && proto_max.empty());
-      std::string ack;
       if (ok) {
-        ack = std::string("{\"ok\":true,\"proto\":\"") + PROTO_VERSION +
-              "\",\"server\":\"" + SERVER_NAME + "\"}";
+        const std::string ack = std::string("{\"ok\":true,\"proto\":\"") +
+                                PROTO_VERSION + "\",\"server\":\"" + SERVER_NAME +
+                                "\"}";
         send_frame(client, MSG_HELLO_ACK, 0, frame.seq, ack);
         client->hello_ok = true;
         const std::string raw_state = state_provider_ ? state_provider_() : "{}";
         if (raw_state.find("\"battery\"") == std::string::npos) {
-          log_("[tcp] robot state has no battery/pose — start fake_robot and "
+          log_("[tcp] robot state offline/empty — start fake_robot and "
                "lifecycle configure+activate");
         }
-        const std::string state = inject_runtime_fields(raw_state, "ONLINE");
-        send_frame(client, MSG_STATE_SNAPSHOT, 0, 0, state);
+        send_frame(client, MSG_STATE_SNAPSHOT, 0, 0,
+                   inject_runtime_fields(raw_state, "OFFLINE"));
       } else {
-        ack = "{\"ok\":false,\"reason\":\"proto_unsupported\"}";
-        send_frame(client, MSG_HELLO_ACK, 0, frame.seq, ack);
+        send_frame(client, MSG_HELLO_ACK, 0, frame.seq,
+                   "{\"ok\":false,\"reason\":\"proto_unsupported\"}");
       }
       break;
     }
@@ -323,6 +326,10 @@ void TcpServer::handle_frame(const std::shared_ptr<Client>& client,
     case MSG_CMD_RESET:
     case MSG_PARAM_GET:
     case MSG_PARAM_SET: {
+      if (frame.type == MSG_CMD_ESTOP &&
+          (frame.flags & FLAG_URGENT) == 0 && log_) {
+        log_("[tcp] CMD_ESTOP missing URGENT flag (PROTOCOL §5.7)");
+      }
       std::string cmd_name = msg_type_name(frame.type);
       std::string ack_payload;
       if (!client->hello_ok) {
@@ -341,30 +348,24 @@ void TcpServer::handle_frame(const std::shared_ptr<Client>& client,
       send_frame(client, MSG_CMD_ACK, 0, frame.seq, ack_payload);
       break;
     }
-    default: {
-      if (log_) {
-        log_("[tcp] ignore unhandled type 0x" +
-             std::to_string(static_cast<int>(frame.type)));
-      }
+    default:
       break;
-    }
   }
 }
 
 void TcpServer::broadcast_state_delta()
 {
-  if (!running_.load()) {
+  if (!running_.load() || !state_provider_) {
     return;
   }
-  const std::string raw = state_provider_ ? state_provider_() : "{}";
-  const std::string body = inject_runtime_fields(raw, "ONLINE");
+  const std::string body = inject_runtime_fields(state_provider_(), "OFFLINE");
   std::vector<std::shared_ptr<Client>> snapshot;
   {
     std::lock_guard<std::mutex> lock(clients_mu_);
     snapshot = clients_;
   }
   for (auto& c : snapshot) {
-    if (c && c->hello_ok && c->fd >= 0) {
+    if (c && c->hello_ok && c->fd.load() >= 0) {
       // Week-1 allows full snapshot body on DELTA.
       send_frame(c, MSG_STATE_DELTA, 0, 0, body);
     }
@@ -373,6 +374,7 @@ void TcpServer::broadcast_state_delta()
 
 void TcpServer::heartbeat_watchdog()
 {
+  uint64_t last_tx = 0;
   while (running_.load()) {
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
     const uint64_t now = now_ms();
@@ -381,18 +383,35 @@ void TcpServer::heartbeat_watchdog()
       std::lock_guard<std::mutex> lock(clients_mu_);
       snapshot = clients_;
     }
+    // PROTOCOL §3: bridge also sends HEARTBEAT every 1000 ms (bidirectional).
+    if (now - last_tx >= static_cast<uint64_t>(HB_INTERVAL_MS)) {
+      last_tx = now;
+      const std::string hb = std::string("{\"ts_ms\":") + std::to_string(now) +
+                             ",\"role\":\"bridge\"}";
+      for (auto& c : snapshot) {
+        if (c && c->hello_ok && c->fd.load() >= 0) {
+          send_frame(c, MSG_HEARTBEAT, 0, 0, hb);
+        }
+      }
+    }
     for (auto& c : snapshot) {
-      if (!c || c->fd < 0) {
+      if (!c) {
         continue;
       }
-      if (!c->hello_ok) {
-        continue;  // HELLO grace handled by client_loop disconnect
+      const int fd = c->fd.load();
+      if (fd < 0) {
+        continue;
       }
-      if (now - c->last_hb_rx_ms > static_cast<uint64_t>(HB_TIMEOUT_MS)) {
+      // Drop idle non-HELLO sockets and heartbeat-timeout clients.
+      const uint64_t ref = c->hello_ok ? c->last_hb_rx_ms : c->last_rx_ms;
+      const uint64_t limit = c->hello_ok ? static_cast<uint64_t>(HB_TIMEOUT_MS)
+                                          : static_cast<uint64_t>(HB_TIMEOUT_MS * 2);
+      if (ref > 0 && now - ref > limit) {
         if (log_) {
-          log_("[tcp] heartbeat timeout, dropping client");
+          log_(c->hello_ok ? "[tcp] heartbeat timeout, dropping client"
+                           : "[tcp] HELLO timeout, dropping client");
         }
-        ::shutdown(c->fd, SHUT_RDWR);
+        ::shutdown(fd, SHUT_RDWR);
       }
     }
   }
