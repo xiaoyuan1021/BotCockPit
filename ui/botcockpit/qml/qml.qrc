@@ -1,0 +1,7 @@
+<RCC>
+    <qresource prefix="/">
+        <file>Main.qml</file>
+        <file>ConnectPage.qml</file>
+        <file>DashboardPage.qml</file>
+    </qresource>
+</RCC>

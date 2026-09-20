@@ -1,0 +1,29 @@
+# Build
+build/
+install/
+log/
+ros2_ws/
+**/build/
+**/install/
+**/log/
+
+# Qt
+ui/**/build-*/
+*.user
+*.autosave
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Logs & bags
+*.log
+*.bag
+*.db3
