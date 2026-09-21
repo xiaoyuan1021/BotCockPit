@@ -13,7 +13,7 @@ int main(int argc, char* argv[])
     QGuiApplication::setApplicationName(QStringLiteral("BotCockpit"));
     QGuiApplication::setApplicationVersion(QStringLiteral("0.1.0"));
     QGuiApplication::setOrganizationName(QStringLiteral("BotCockpit"));
-    QQuickStyle::setStyle(QStringLiteral("Basic"));
+    QQuickStyle::setStyle(QStringLiteral("Fusion"));
 
     RobotState robotState;
     NodeTableModel nodeModel;

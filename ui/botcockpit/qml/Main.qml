@@ -2,7 +2,6 @@ import QtQuick
 import QtQuick.Window
 import QtQuick.Controls
 import QtQuick.Layouts
-import QtQuick.Controls.impl
 
 ApplicationWindow {
     id: root
@@ -10,31 +9,30 @@ ApplicationWindow {
     height: 720
     visible: true
     title: qsTr("BotCockpit — ROS2 Robot Console")
-    color: "#0f1218"
+    color: "#f3f5f9"
 
-    // Industrial debug palette (Foxglove / HMI inspired)
-    property color colBg: "#0f1218"
-    property color colSurface: "#1a1f2a"
-    property color colSurfaceAlt: "#222938"
-    property color colBorder: "#2e3648"
-    property color colInk: "#e8ecf4"
-    property color colMuted: "#8b93a7"
-    property color colAccent: "#3aa0ff"
-    property color colOk: "#3ddc97"
-    property color colWarn: "#f0b429"
-    property color colDanger: "#ff5c5c"
-    property color colRunning: "#4cc2ff"
-    property color colEstop: "#ff3b3b"
+    // Light industrial lab palette
+    property color colBg: "#f3f5f9"
+    property color colSurface: "#ffffff"
+    property color colSurfaceAlt: "#e8eef6"
+    property color colBorder: "#cfd8e6"
+    property color colInk: "#1c2430"
+    property color colMuted: "#5d6b80"
+    property color colAccent: "#1a6fd4"
+    property color colOk: "#0f8a4a"
+    property color colWarn: "#b07000"
+    property color colDanger: "#c62828"
+    property color colRunning: "#1565c0"
+    property color colEstop: "#c62828"
 
     property int currentPage: 0
 
     font.family: "Segoe UI, Ubuntu, Noto Sans CJK SC, sans-serif"
     font.pixelSize: 13
 
-    // Shared components live in LiveDot.qml / ToolBtn.qml (qrc)
-
     header: ToolBar {
-        height: 52
+        height: 54
+        padding: 0
         background: Rectangle {
             color: root.colSurface
             Rectangle {
@@ -44,30 +42,34 @@ ApplicationWindow {
                 color: root.colBorder
             }
         }
+
         RowLayout {
             anchors.fill: parent
-            anchors.leftMargin: 14
-            anchors.rightMargin: 14
-            spacing: 14
+            anchors.leftMargin: 12
+            anchors.rightMargin: 12
+            spacing: 12
 
+            // Brand
             Row {
                 spacing: 8
-                anchors.verticalCenter: parent.verticalCenter
+                Layout.alignment: Qt.AlignVCenter
+                Layout.preferredWidth: brand.implicitWidth + 30
                 Rectangle {
-                    width: 22
-                    height: 22
+                    width: 24
+                    height: 24
                     radius: 6
                     color: root.colAccent
                     anchors.verticalCenter: parent.verticalCenter
                     Text {
                         anchors.centerIn: parent
                         text: "BC"
-                        color: "#061018"
+                        color: "white"
                         font.bold: true
                         font.pixelSize: 10
                     }
                 }
                 Text {
+                    id: brand
                     text: "BotCockpit"
                     color: root.colInk
                     font.bold: true
@@ -79,44 +81,49 @@ ApplicationWindow {
             TabBar {
                 id: tabBar
                 Layout.fillWidth: true
+                Layout.alignment: Qt.AlignVCenter
                 background: Item {}
-                TabButton {
-                    text: qsTr("Connect")
-                    width: implicitWidth + 20
-                }
-                TabButton {
-                    text: qsTr("Dashboard")
-                    width: implicitWidth + 20
-                }
-                TabButton {
-                    text: qsTr("Control")
-                    width: implicitWidth + 20
-                }
+                TabButton { text: qsTr("Connect"); width: implicitWidth + 24 }
+                TabButton { text: qsTr("Dashboard"); width: implicitWidth + 24 }
+                TabButton { text: qsTr("Control"); width: implicitWidth + 24 }
                 onCurrentIndexChanged: {
                     root.currentPage = currentIndex
                     fadeAnim.restart()
                 }
             }
 
+            // Link status — keep on one line, not clipped
             Row {
+                id: linkRow
                 spacing: 8
-                anchors.verticalCenter: parent.verticalCenter
+                Layout.alignment: Qt.AlignVCenter
+                Layout.minimumWidth: linkText.implicitWidth + 22
                 LiveDot {
                     active: robotState.connected
                     base: robotState.estop ? root.colEstop
                          : (robotState.phase === "RUNNING" ? root.colRunning : root.colOk)
+                    anchors.verticalCenter: parent.verticalCenter
                 }
                 Text {
+                    id: linkText
                     text: robotState.connected
                           ? (qsTr("ONLINE") + " · " + robotState.heartbeatRttMs + " ms")
                           : (robotState.connecting ? qsTr("CONNECTING…") : qsTr("OFFLINE"))
                     color: robotState.connected ? root.colOk : root.colDanger
                     font.bold: true
                     anchors.verticalCenter: parent.verticalCenter
+                    elide: Text.ElideRight
+                    maximumLineCount: 1
                 }
             }
 
+            // Phase chip — full text, no truncation
             Rectangle {
+                id: phaseChip
+                Layout.alignment: Qt.AlignVCenter
+                Layout.preferredWidth: phaseLabel.implicitWidth + 20
+                Layout.maximumWidth: 220
+                height: 34
                 radius: 8
                 color: root.colSurfaceAlt
                 border.color: {
@@ -125,16 +132,19 @@ ApplicationWindow {
                     return robotState.controlEnabled ? root.colOk : root.colWarn
                 }
                 border.width: 1
-                height: 32
-                width: phaseChip.implicitWidth + 18
-                anchors.verticalCenter: parent.verticalCenter
+                Behavior on border.color { ColorAnimation { duration: 180 } }
+
                 Text {
-                    id: phaseChip
+                    id: phaseLabel
                     anchors.centerIn: parent
+                    width: parent.width - 16
+                    horizontalAlignment: Text.AlignHCenter
                     text: {
                         if (!robotState.connected) return qsTr("OFFLINE")
                         if (robotState.estop) return qsTr("ESTOP")
-                        return robotState.phase + (robotState.controlEnabled ? "" : " · ctl off")
+                        // short form so chip always fits
+                        var p = robotState.phase
+                        return robotState.controlEnabled ? p : (p + " · ctl off")
                     }
                     color: {
                         if (!robotState.connected) return root.colMuted
@@ -144,13 +154,13 @@ ApplicationWindow {
                     }
                     font.bold: true
                     font.pixelSize: 12
+                    elide: Text.ElideRight
+                    maximumLineCount: 1
                 }
-                Behavior on border.color { ColorAnimation { duration: 180 } }
             }
         }
     }
 
-    // Tab content with crossfade
     Item {
         id: contentHost
         anchors.fill: parent
@@ -158,9 +168,9 @@ ApplicationWindow {
         OpacityAnimator {
             id: fadeAnim
             target: contentHost
-            from: 0.35
+            from: 0.4
             to: 1.0
-            duration: 160
+            duration: 150
             easing.type: Easing.OutQuad
         }
 
@@ -168,7 +178,6 @@ ApplicationWindow {
             anchors.fill: parent
             anchors.margins: 12
             currentIndex: root.currentPage
-
             ConnectPage {}
             DashboardPage {}
             ControlPage {}
@@ -177,6 +186,7 @@ ApplicationWindow {
 
     footer: ToolBar {
         height: 30
+        padding: 0
         background: Rectangle { color: root.colSurface }
         Text {
             anchors.verticalCenter: parent.verticalCenter

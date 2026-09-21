@@ -17,12 +17,12 @@ Pane {
     readonly property bool canEstop: robotState.connected
 
     property color phaseColor: {
-        if (!robotState.connected) return controlPage.win.colSurfaceAlt
+        if (!robotState.connected) return controlPage.win.colMuted
         if (robotState.estop) return controlPage.win.colEstop
         if (robotState.phase === "RUNNING") return controlPage.win.colRunning
         if (robotState.phase === "FAULT" || robotState.phase === "DEGRADED") return controlPage.win.colWarn
         if (robotState.phase === "IDLE" && robotState.controlEnabled) return controlPage.win.colOk
-        return controlPage.win.colSurfaceAlt
+        return controlPage.win.colAccent
     }
 
     ColumnLayout {
@@ -37,28 +37,26 @@ Pane {
             color: controlPage.win.colInk
         }
 
-        // Animated phase banner
+        // Animated phase banner (light theme: saturated fill + white text)
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 64
             radius: 12
-            color: Qt.darker(controlPage.phaseColor, 2.2)
-            border.color: controlPage.phaseColor
-            border.width: 2
+            color: controlPage.phaseColor
+            border.color: Qt.darker(controlPage.phaseColor, 1.15)
+            border.width: 1
             Behavior on color { ColorAnimation { duration: 220 } }
-            Behavior on border.color { ColorAnimation { duration: 220 } }
 
-            // pulse when RUNNING or ESTOP
             Rectangle {
                 anchors.fill: parent
                 radius: 12
-                color: controlPage.phaseColor
+                color: "#ffffff"
                 opacity: 0
                 visible: robotState.phase === "RUNNING" || robotState.estop
                 SequentialAnimation on opacity {
                     running: visible
                     loops: Animation.Infinite
-                    NumberAnimation { from: 0.12; to: 0.0; duration: 900; easing.type: Easing.OutQuad }
+                    NumberAnimation { from: 0.18; to: 0.0; duration: 900; easing.type: Easing.OutQuad }
                 }
             }
 
@@ -73,7 +71,7 @@ Pane {
                                + (robotState.estop ? qsTr(" / ESTOP") : "")
                     }
                     color: "#ffffff"
-                    font.pixelSize: 22
+                    font.pixelSize: 20
                     font.bold: true
                     Layout.fillWidth: true
                 }
@@ -85,7 +83,9 @@ Pane {
                                + (id ? (" · " + id) : "")
                     }
                     color: "#ffffff"
-                    opacity: 0.9
+                    opacity: 0.95
+                    elide: Text.ElideRight
+                    Layout.maximumWidth: 320
                 }
                 Text {
                     text: robotState.controlEnabled ? qsTr("ctl ON") : qsTr("ctl OFF")
