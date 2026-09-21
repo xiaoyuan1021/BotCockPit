@@ -26,12 +26,60 @@ Pane {
                 font.bold: true
                 Layout.fillWidth: true
             }
-            Label {
-                text: robotState.phase + " · " + robotState.mode
-                      + (robotState.estop ? " · ESTOP" : "")
-                      + (robotState.controlEnabled ? "" : " · ctl off")
-                opacity: 0.8
+        }
+
+        // Big live status — always visible while operating Control
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 56
+            radius: 6
+            color: {
+                if (!robotState.connected) return "#5c1616"
+                if (robotState.estop) return "#8a1f1f"
+                if (robotState.phase === "RUNNING") return "#0d4f8b"
+                if (robotState.phase === "FAULT" || robotState.phase === "DEGRADED") return "#8a6d1f"
+                return "#1b7f3a"
             }
+            RowLayout {
+                anchors.fill: parent
+                anchors.margins: 10
+                spacing: 16
+                Label {
+                    text: {
+                        if (!robotState.connected) return qsTr("OFFLINE")
+                        return "PHASE: " + robotState.phase
+                               + (robotState.estop ? qsTr(" / ESTOP") : "")
+                    }
+                    color: "white"
+                    font.pixelSize: 20
+                    font.bold: true
+                    Layout.fillWidth: true
+                }
+                Label {
+                    text: {
+                        var t = robotState.taskType.length ? robotState.taskType : "—"
+                        var s = robotState.taskStatus
+                        var id = robotState.taskId.length ? robotState.taskId : ""
+                        return "TASK: " + t + " · " + s + (id ? (" · " + id) : "")
+                    }
+                    color: "white"
+                    font.pixelSize: 14
+                }
+                Label {
+                    text: robotState.controlEnabled ? qsTr("ctl ON") : qsTr("ctl OFF")
+                    color: "white"
+                    font.pixelSize: 14
+                    font.bold: true
+                }
+            }
+        }
+
+        Label {
+            visible: robotState.connected && robotState.phase === "RUNNING"
+            text: qsTr("Task running — pose is moving; phase will return to IDLE when goal is reached (task DONE).")
+            opacity: 0.75
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
         }
 
         GroupBox {
@@ -82,14 +130,14 @@ Pane {
                 Label { text: "x" }
                 TextField {
                     id: xField
-                    text: "2.0"
+                    text: "8.0"
                     Layout.preferredWidth: 70
                     enabled: controlPage.canDrive
                 }
                 Label { text: "y" }
                 TextField {
                     id: yField
-                    text: "1.0"
+                    text: "0.0"
                     Layout.preferredWidth: 70
                     enabled: controlPage.canDrive
                 }
