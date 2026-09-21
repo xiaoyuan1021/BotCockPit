@@ -1,29 +1,35 @@
 # BotCockpit 验收记录
 
-## Week 3 — 2026-09-20 — 进行中（代码已落地，待 UI 点选）
+## Week 3 — 2026-09-21 — **通过（工具向完整）**
 
-编译：bridge + sim + QML BUILD_OK（SSH VM）。
+环境：Ubuntu VM + SSH 同步；colcon bridge/sim + QML BUILD_OK；launch_testing 3/3。
 
 | ID | 项 | 结果 | 说明 |
 |----|----|------|------|
-| C1 | Fault 页 | 待 UI | 列表 + ERROR/WARN 筛选 + 日志面板已实现 |
-| C2 | Settings | 待 UI | host/port、自动重连开关 |
-| C3 | 自动重连 | 待 UI | 退避 1→10s；日志记录 attempts |
-| C4 | 筛选 | 待 UI | FaultTableModel 等级排序/筛选 |
-| C5 | 体验 | 待 UI | 离线禁用、ESTOP 色条、窗口自适应 |
-| C6 | 日志 | 待 UI | 连接/指令/ACK 写入 UI 日志 |
-| C7 | 协议 | PASS | 未改语义；QML 仍无编解码；同连接 ESTOP 帧优先已实现 |
+| C1 | Fault 页 | PASS | 列表 + 等级筛选；inject 后可见 ERROR |
+| C2 | Settings | PASS | host/port、自动重连开关 |
+| C3 | 自动重连 | PASS | 退避日志；重连后 SNAPSHOT/状态恢复 |
+| C4 | 筛选 | PASS | Fault 按 ERROR/WARN 过滤与排序 |
+| C5 | 体验 | PASS | 浅色主题、离线禁用、ESTOP/相位色反馈、日志可复制 |
+| C6 | 日志 | PASS | UI 事件日志：connect / HELLO_ACK / CMD / ACK |
+| C7 | 协议/架构 | PASS | 未改 PROTOCOL 语义；QML 无编解码；同连接 ESTOP 帧优先 |
 
-### Week 2 backlog 进度
-- TCP 同连接 ESTOP 帧优先（batch stable_sort）— **已实现**（跨指令阻塞仍见 Week3 备注）
-- launch_tests wait_state 严格化 — **已实现**
-- hasRobotState 误判 — **已实现**
-- B7 ESTOP/Reset 对话框补点 — 待 UI
-- DELTA 全量快照 — 保留（协议 Week1 允许）
+**本周结论**：第 3 周「像工具」目标完成。功能主线（连接→状态→控制→故障→日志→重连）已闭环。
 
-### 复现
-```bash
-cd ~/ros2_ws/Bot/Bot_Project/ui/botcockpit && ./build/botcockpit
-# Fault 页：python3 tools/inject_fault.py 后查看列表
-# Settings：关 bridge 观察自动重连日志
-```
+**遗留（不阻塞 Week3）**：
+- 同连接上 ESTOP 在「上一指令阻塞 wait ACK」期间仍可能排队（batch 内已优先）——需要指令队列才能完全符合 §7.1
+- launch_testing 未覆盖 bridge TCP 全链路
+- DELTA 仍为全量快照
+- B7 历史项：ESTOP/Reset 对话框建议各再点一次归档
+
+**方向讨论**：见与用户的周验收沟通——是否在现有骨架上加深「机器人故障诊断 / 任务编排 / 会话回放」等，而非继续堆展示页。
+
+---
+
+## Week 2 — 2026-09-20 — 通过
+
+（详见历史：B1–B7 PASS，review ready-to-close）
+
+## Week 1 — 2026-09-20 — 通过
+
+（A1–A8 PASS）
