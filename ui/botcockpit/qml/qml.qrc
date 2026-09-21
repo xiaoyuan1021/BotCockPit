@@ -4,5 +4,7 @@
         <file>ConnectPage.qml</file>
         <file>DashboardPage.qml</file>
         <file>ControlPage.qml</file>
+        <file>LiveDot.qml</file>
+        <file>ToolBtn.qml</file>
     </qresource>
 </RCC>

@@ -1,172 +1,217 @@
 import QtQuick
+import QtQuick.Window
 import QtQuick.Controls
 import QtQuick.Layouts
 
 Pane {
     id: pane
+    padding: 0
+    background: Item {}
+    readonly property var win: Window.window
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 16
-        spacing: 12
+        anchors.margins: 4
+        spacing: 10
 
         RowLayout {
             Layout.fillWidth: true
+            spacing: 10
 
-            Label {
+            Text {
                 text: qsTr("Dashboard")
-                font.pixelSize: 20
+                font.pixelSize: 22
                 font.bold: true
+                color: pane.win.colInk
                 Layout.fillWidth: true
+            }
+            LiveDot { active: robotState.connected }
+            Text {
+                text: robotState.connected ? qsTr("LIVE") : qsTr("NO LINK")
+                color: robotState.connected ? pane.win.colOk : pane.win.colDanger
+                font.bold: true
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 10
+
+            Rectangle {
+                Layout.fillWidth: true
+                radius: 10
+                color: pane.win.colSurface
+                border.color: pane.win.colBorder
+                implicitHeight: keyGrid.implicitHeight + 24
+                GridLayout {
+                    id: keyGrid
+                    anchors.fill: parent
+                    anchors.margins: 12
+                    columns: 4
+                    columnSpacing: 18
+                    rowSpacing: 8
+
+                    Text { text: qsTr("conn"); color: pane.win.colMuted }
+                    Text {
+                        text: robotState.conn
+                        color: robotState.conn === "ONLINE" ? pane.win.colOk
+                             : robotState.estop ? pane.win.colEstop : pane.win.colDanger
+                        font.bold: true
+                    }
+                    Text { text: qsTr("mode"); color: pane.win.colMuted }
+                    Text { text: robotState.mode; color: pane.win.colInk; font.bold: true }
+
+                    Text { text: qsTr("phase"); color: pane.win.colMuted }
+                    Text {
+                        text: robotState.phase
+                        color: robotState.phase === "RUNNING" ? pane.win.colRunning
+                             : robotState.phase === "ESTOP" ? pane.win.colEstop
+                             : robotState.phase === "FAULT" ? pane.win.colDanger
+                             : pane.win.colInk
+                        font.bold: true
+                        Behavior on color { ColorAnimation { duration: 200 } }
+                    }
+                    Text { text: qsTr("estop"); color: pane.win.colMuted }
+                    Text {
+                        text: robotState.estop ? qsTr("ACTIVE") : qsTr("false")
+                        color: robotState.estop ? pane.win.colEstop : pane.win.colMuted
+                        font.bold: true
+                    }
+
+                    Text { text: qsTr("control"); color: pane.win.colMuted }
+                    Text {
+                        text: robotState.controlEnabled ? qsTr("enabled") : qsTr("disabled")
+                        color: robotState.controlEnabled ? pane.win.colOk : pane.win.colWarn
+                        font.bold: true
+                    }
+                    Text { text: qsTr("battery"); color: pane.win.colMuted }
+                    Text {
+                        text: robotState.battery.toFixed(1) + " %"
+                        color: robotState.battery < 20 ? pane.win.colWarn : pane.win.colInk
+                        font.bold: true
+                    }
+                }
             }
 
             Rectangle {
-                width: 10
-                height: 10
-                radius: 5
-                color: robotState.connected ? "#1b7f3a" : "#8a1f1f"
-            }
-            Label {
-                text: robotState.connected ? qsTr("LIVE") : qsTr("NO LINK")
-            }
-        }
-
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 12
-
-            Frame {
                 Layout.fillWidth: true
+                radius: 10
+                color: pane.win.colSurface
+                border.color: pane.win.colBorder
+                implicitHeight: keyGrid.implicitHeight + 24
                 GridLayout {
                     anchors.fill: parent
-                    anchors.margins: 8
+                    anchors.margins: 12
                     columns: 4
-                    columnSpacing: 16
+                    columnSpacing: 18
                     rowSpacing: 8
+                    Text { text: "pose.x"; color: pane.win.colMuted }
+                    Text { text: robotState.poseX.toFixed(3) + " m"; color: pane.win.colInk }
+                    Text { text: "pose.y"; color: pane.win.colMuted }
+                    Text { text: robotState.poseY.toFixed(3) + " m"; color: pane.win.colInk }
 
-                    Label { text: qsTr("conn"); opacity: 0.6 }
-                    Label { text: robotState.conn; font.bold: true }
-                    Label { text: qsTr("mode"); opacity: 0.6 }
-                    Label { text: robotState.mode; font.bold: true }
+                    Text { text: "pose.yaw"; color: pane.win.colMuted }
+                    Text { text: robotState.poseYaw.toFixed(3) + " rad"; color: pane.win.colInk }
+                    Text { text: qsTr("RTT"); color: pane.win.colMuted }
+                    Text { text: robotState.heartbeatRttMs + " ms"; color: pane.win.colInk }
 
-                    Label { text: qsTr("phase"); opacity: 0.6 }
-                    Label { text: robotState.phase; font.bold: true }
-                    Label { text: qsTr("estop"); opacity: 0.6 }
-                    Label {
-                        text: robotState.estop ? qsTr("ACTIVE") : qsTr("false")
-                        font.bold: true
-                        color: robotState.estop ? "#8a1f1f" : palette.text
-                    }
-
-                    Label { text: qsTr("control"); opacity: 0.6 }
-                    Label {
-                        text: robotState.controlEnabled ? qsTr("enabled") : qsTr("disabled")
-                        font.bold: true
-                    }
-                    Label { text: qsTr("battery"); opacity: 0.6 }
-                    Label { text: robotState.battery.toFixed(1) + " %"; font.bold: true }
-                }
-            }
-
-            Frame {
-                Layout.fillWidth: true
-                GridLayout {
-                    anchors.fill: parent
-                    anchors.margins: 8
-                    columns: 4
-                    columnSpacing: 16
-                    rowSpacing: 8
-
-                    Label { text: "pose.x"; opacity: 0.6 }
-                    Label { text: robotState.poseX.toFixed(3) + " m" }
-                    Label { text: "pose.y"; opacity: 0.6 }
-                    Label { text: robotState.poseY.toFixed(3) + " m" }
-
-                    Label { text: "pose.yaw"; opacity: 0.6 }
-                    Label { text: robotState.poseYaw.toFixed(3) + " rad" }
-                    Label { text: qsTr("RTT"); opacity: 0.6 }
-                    Label { text: robotState.heartbeatRttMs + " ms" }
-
-                    Label { text: qsTr("task"); opacity: 0.6 }
-                    Label {
+                    Text { text: qsTr("task"); color: pane.win.colMuted }
+                    Text {
+                        Layout.columnSpan: 3
                         text: (robotState.taskType.length ? robotState.taskType : "—")
                               + " · " + robotState.taskStatus
-                        Layout.columnSpan: 3
+                        color: pane.win.colInk
+                        font.bold: true
                     }
                 }
             }
         }
 
-        Label {
-            text: qsTr("Nodes")
-            font.bold: true
+        // battery bar
+        Rectangle {
+            Layout.fillWidth: true
+            height: 6
+            radius: 3
+            color: pane.win.colSurfaceAlt
+            Rectangle {
+                width: parent.width * Math.max(0, Math.min(1, robotState.battery / 100.0))
+                height: parent.height
+                radius: 3
+                color: robotState.battery < 20 ? pane.win.colWarn
+                     : robotState.battery < 50 ? pane.win.colAccent
+                     : pane.win.colOk
+                Behavior on width { NumberAnimation { duration: 220; easing.type: Easing.OutQuad } }
+                Behavior on color { ColorAnimation { duration: 200 } }
+            }
         }
 
-        Frame {
+        Text { text: qsTr("Nodes"); color: pane.win.colInk; font.bold: true }
+
+        Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            padding: 0
+            radius: 10
+            color: pane.win.colSurface
+            border.color: pane.win.colBorder
+            clip: true
 
             ListView {
                 id: nodeView
                 anchors.fill: parent
-                anchors.margins: 1
+                anchors.margins: 8
+                spacing: 4
                 clip: true
                 model: nodeModel
                 boundsBehavior: Flickable.StopAtBounds
 
                 header: Rectangle {
                     width: nodeView.width
-                    height: 28
-                    color: "#e8eef5"
+                    height: 30
+                    radius: 6
+                    color: pane.win.colSurfaceAlt
                     Row {
                         anchors.fill: parent
-                        anchors.leftMargin: 8
-                        anchors.rightMargin: 8
-                        spacing: 0
-                        Label { width: parent.width * 0.4; text: qsTr("name"); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
-                        Label { width: parent.width * 0.3; text: qsTr("status"); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
-                        Label { width: parent.width * 0.3; text: qsTr("last_hb"); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+                        anchors.leftMargin: 10
+                        anchors.rightMargin: 10
+                        Text { width: parent.width * 0.4; text: qsTr("name"); color: pane.win.colMuted; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+                        Text { width: parent.width * 0.3; text: qsTr("status"); color: pane.win.colMuted; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+                        Text { width: parent.width * 0.3; text: qsTr("last_hb"); color: pane.win.colMuted; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
                     }
                 }
 
                 delegate: Rectangle {
                     width: nodeView.width
-                    height: 32
-                    color: index % 2 === 0 ? "#ffffff" : "#f6f8fb"
+                    height: 34
+                    radius: 6
+                    color: index % 2 === 0 ? Qt.rgba(1,1,1,0.02) : "transparent"
                     required property string name
                     required property string status
                     required property var lastHbMs
                     required property int index
-
                     Row {
                         anchors.fill: parent
-                        anchors.leftMargin: 8
-                        anchors.rightMargin: 8
-                        spacing: 0
-                        Label {
-                            width: parent.width * 0.4
-                            text: name
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
-                        Label {
+                        anchors.leftMargin: 10
+                        anchors.rightMargin: 10
+                        Text { width: parent.width * 0.4; text: name; color: pane.win.colInk; anchors.verticalCenter: parent.verticalCenter }
+                        Text {
                             width: parent.width * 0.3
                             text: status
-                            anchors.verticalCenter: parent.verticalCenter
-                            color: status === "OK" ? "#1b7f3a"
-                                 : status === "WARN" ? "#9a6b00"
-                                 : "#8a1f1f"
                             font.bold: true
+                            anchors.verticalCenter: parent.verticalCenter
+                            color: status === "OK" ? pane.win.colOk
+                                 : status === "WARN" ? pane.win.colWarn
+                                 : pane.win.colDanger
                         }
-                        Label {
+                        Text {
                             width: parent.width * 0.3
                             text: lastHbMs
+                            color: pane.win.colMuted
                             anchors.verticalCenter: parent.verticalCenter
                         }
                     }
                 }
 
-                Label {
+                Text {
                     anchors.centerIn: parent
                     visible: nodeView.count === 0
                     width: parent.width * 0.9
@@ -176,22 +221,22 @@ Pane {
                         if (!robotState.connected)
                             return qsTr("Offline — connect to bridge")
                         if (!robotState.hasRobotState)
-                            return qsTr("Bridge online — waiting for robot state.\nStart fake_robot, then: lifecycle configure + activate")
+                            return qsTr("Bridge online — waiting for robot state.\nStart fake_robot, then lifecycle configure + activate")
                         return qsTr("Waiting for state…")
                     }
-                    opacity: 0.7
+                    color: pane.win.colMuted
                 }
             }
         }
 
-        Label {
+        Text {
             text: robotState.connected && !robotState.hasRobotState
-                  ? qsTr("Robot state: NOT RECEIVED — activate fake_robot (ros2 lifecycle set /fake_robot configure && activate)")
+                  ? qsTr("Robot state: NOT RECEIVED — activate fake_robot")
                   : (qsTr("Faults: ") + (robotState.faultCount === 0
                                       ? qsTr("none")
                                       : (robotState.faultCount + " — " + robotState.faultsSummary)))
             color: (robotState.connected && !robotState.hasRobotState) || robotState.faultCount > 0
-                   ? "#8a1f1f" : palette.text
+                   ? pane.win.colWarn : pane.win.colMuted
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
         }

@@ -1,11 +1,14 @@
 import QtQuick
+import QtQuick.Window
 import QtQuick.Controls
 import QtQuick.Layouts
 
 Pane {
     id: controlPage
+    padding: 0
+    background: Item {}
+    readonly property var win: Window.window
 
-    // Local-only UI enablement; protocol safety is enforced in C++/robot.
     readonly property bool linkOk: robotState.connected
     readonly property bool canDrive: robotState.connected
                                      && robotState.controlEnabled
@@ -13,221 +16,307 @@ Pane {
                                      && robotState.hasRobotState
     readonly property bool canEstop: robotState.connected
 
+    property color phaseColor: {
+        if (!robotState.connected) return controlPage.win.colSurfaceAlt
+        if (robotState.estop) return controlPage.win.colEstop
+        if (robotState.phase === "RUNNING") return controlPage.win.colRunning
+        if (robotState.phase === "FAULT" || robotState.phase === "DEGRADED") return controlPage.win.colWarn
+        if (robotState.phase === "IDLE" && robotState.controlEnabled) return controlPage.win.colOk
+        return controlPage.win.colSurfaceAlt
+    }
+
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 16
-        spacing: 12
+        anchors.margins: 4
+        spacing: 10
 
-        RowLayout {
-            Layout.fillWidth: true
-            Label {
-                text: qsTr("Control")
-                font.pixelSize: 20
-                font.bold: true
-                Layout.fillWidth: true
-            }
+        Text {
+            text: qsTr("Control")
+            font.pixelSize: 22
+            font.bold: true
+            color: controlPage.win.colInk
         }
 
-        // Big live status — always visible while operating Control
+        // Animated phase banner
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 56
-            radius: 6
-            color: {
-                if (!robotState.connected) return "#5c1616"
-                if (robotState.estop) return "#8a1f1f"
-                if (robotState.phase === "RUNNING") return "#0d4f8b"
-                if (robotState.phase === "FAULT" || robotState.phase === "DEGRADED") return "#8a6d1f"
-                return "#1b7f3a"
+            Layout.preferredHeight: 64
+            radius: 12
+            color: Qt.darker(controlPage.phaseColor, 2.2)
+            border.color: controlPage.phaseColor
+            border.width: 2
+            Behavior on color { ColorAnimation { duration: 220 } }
+            Behavior on border.color { ColorAnimation { duration: 220 } }
+
+            // pulse when RUNNING or ESTOP
+            Rectangle {
+                anchors.fill: parent
+                radius: 12
+                color: controlPage.phaseColor
+                opacity: 0
+                visible: robotState.phase === "RUNNING" || robotState.estop
+                SequentialAnimation on opacity {
+                    running: visible
+                    loops: Animation.Infinite
+                    NumberAnimation { from: 0.12; to: 0.0; duration: 900; easing.type: Easing.OutQuad }
+                }
             }
+
             RowLayout {
                 anchors.fill: parent
-                anchors.margins: 10
+                anchors.margins: 12
                 spacing: 16
-                Label {
+                Text {
                     text: {
                         if (!robotState.connected) return qsTr("OFFLINE")
-                        return "PHASE: " + robotState.phase
+                        return qsTr("PHASE: ") + robotState.phase
                                + (robotState.estop ? qsTr(" / ESTOP") : "")
                     }
-                    color: "white"
-                    font.pixelSize: 20
+                    color: "#ffffff"
+                    font.pixelSize: 22
                     font.bold: true
                     Layout.fillWidth: true
                 }
-                Label {
+                Text {
                     text: {
                         var t = robotState.taskType.length ? robotState.taskType : "—"
-                        var s = robotState.taskStatus
                         var id = robotState.taskId.length ? robotState.taskId : ""
-                        return "TASK: " + t + " · " + s + (id ? (" · " + id) : "")
+                        return qsTr("TASK: ") + t + " · " + robotState.taskStatus
+                               + (id ? (" · " + id) : "")
                     }
-                    color: "white"
-                    font.pixelSize: 14
+                    color: "#ffffff"
+                    opacity: 0.9
                 }
-                Label {
+                Text {
                     text: robotState.controlEnabled ? qsTr("ctl ON") : qsTr("ctl OFF")
-                    color: "white"
-                    font.pixelSize: 14
+                    color: "#ffffff"
                     font.bold: true
                 }
             }
         }
 
-        Label {
+        Text {
             visible: robotState.connected && robotState.phase === "RUNNING"
-            text: qsTr("Task running — pose is moving; phase will return to IDLE when goal is reached (task DONE).")
-            opacity: 0.75
+            text: qsTr("Task running — pose is moving; phase returns to IDLE when goal is reached (DONE).")
+            color: controlPage.win.colMuted
+            opacity: 1
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
         }
 
-        GroupBox {
-            title: qsTr("Mode")
+        // Mode
+        Rectangle {
             Layout.fillWidth: true
+            radius: 10
+            color: controlPage.win.colSurface
+            border.color: controlPage.win.colBorder
+            implicitHeight: modeRow.implicitHeight + 24
             RowLayout {
+                id: modeRow
                 anchors.fill: parent
+                anchors.margins: 12
                 spacing: 8
-                Button {
+                Text { text: qsTr("Mode"); color: controlPage.win.colMuted; font.bold: true }
+                ToolBtn {
                     text: "TELEOP"
                     enabled: controlPage.canDrive || (controlPage.linkOk && robotState.mode === "TELEOP")
+                    accent: robotState.mode === "TELEOP" ? controlPage.win.colOk : controlPage.win.colAccent
                     onClicked: connection.cmdMode("TELEOP")
                 }
-                Button {
+                ToolBtn {
                     text: "AUTO"
                     enabled: controlPage.canDrive
+                    accent: robotState.mode === "AUTO" ? controlPage.win.colOk : controlPage.win.colAccent
                     onClicked: connection.cmdMode("AUTO")
                 }
-                Button {
+                ToolBtn {
                     text: "REMOTE"
                     enabled: controlPage.canDrive || (controlPage.linkOk && robotState.mode === "REMOTE")
+                    accent: robotState.mode === "REMOTE" ? controlPage.win.colOk : controlPage.win.colAccent
                     onClicked: connection.cmdMode("REMOTE")
                 }
                 Item { Layout.fillWidth: true }
-                Label {
+                Text {
                     text: qsTr("current: ") + robotState.mode
-                    opacity: 0.7
+                    color: controlPage.win.colMuted
                 }
             }
         }
 
-        GroupBox {
-            title: qsTr("Task")
+        // Task
+        Rectangle {
             Layout.fillWidth: true
+            radius: 10
+            color: controlPage.win.colSurface
+            border.color: controlPage.win.colBorder
+            implicitHeight: taskGrid.implicitHeight + 24
             GridLayout {
+                id: taskGrid
+                anchors.fill: parent
+                anchors.margins: 12
                 columns: 6
                 columnSpacing: 8
                 rowSpacing: 8
-                anchors.fill: parent
 
-                Label { text: "task_id" }
+                Text { text: "task_id"; color: controlPage.win.colMuted }
                 TextField {
                     id: taskIdField
                     text: "T-001"
                     Layout.preferredWidth: 100
                     enabled: controlPage.canDrive
+                    color: controlPage.win.colInk
+                    background: Rectangle {
+                        implicitHeight: 32
+                        radius: 6
+                        color: controlPage.win.colSurfaceAlt
+                        border.color: controlPage.win.colBorder
+                    }
                 }
-                Label { text: "x" }
+                Text { text: "x"; color: controlPage.win.colMuted }
                 TextField {
                     id: xField
                     text: "8.0"
                     Layout.preferredWidth: 70
                     enabled: controlPage.canDrive
+                    color: controlPage.win.colInk
+                    background: Rectangle {
+                        implicitHeight: 32
+                        radius: 6
+                        color: controlPage.win.colSurfaceAlt
+                        border.color: controlPage.win.colBorder
+                    }
                 }
-                Label { text: "y" }
+                Text { text: "y"; color: controlPage.win.colMuted }
                 TextField {
                     id: yField
                     text: "0.0"
                     Layout.preferredWidth: 70
                     enabled: controlPage.canDrive
-                }
-
-                Button {
-                    text: qsTr("Send goto")
-                    enabled: controlPage.canDrive
-                    onClicked: {
-                        connection.cmdTaskGoto(taskIdField.text.trim(),
-                                                parseFloat(xField.text),
-                                                parseFloat(yField.text))
+                    color: controlPage.win.colInk
+                    background: Rectangle {
+                        implicitHeight: 32
+                        radius: 6
+                        color: controlPage.win.colSurfaceAlt
+                        border.color: controlPage.win.colBorder
                     }
                 }
-                Button {
+
+                ToolBtn {
+                    text: qsTr("Send goto")
+                    enabled: controlPage.canDrive
+                    accent: controlPage.win.colAccent
+                    onClicked: connection.cmdTaskGoto(taskIdField.text.trim(),
+                                                      parseFloat(xField.text),
+                                                      parseFloat(yField.text))
+                }
+                ToolBtn {
                     text: qsTr("Pause")
                     enabled: controlPage.linkOk && robotState.phase === "RUNNING"
+                    accent: controlPage.win.colWarn
                     onClicked: connection.cmdTaskSimple("pause")
                 }
-                Button {
+                ToolBtn {
                     text: qsTr("Resume")
-                    enabled: controlPage.linkOk && !robotState.estop
-                             && robotState.taskType === "goto"
+                    enabled: controlPage.linkOk && !robotState.estop && robotState.taskType === "goto"
+                    accent: controlPage.win.colOk
                     onClicked: connection.cmdTaskSimple("resume")
                 }
-                Button {
+                ToolBtn {
                     text: qsTr("Cancel")
                     enabled: controlPage.linkOk
+                    accent: controlPage.win.colMuted
                     onClicked: connection.cmdTaskSimple("cancel")
                 }
-
-                Label { text: qsTr("task"); opacity: 0.6 }
-                Label {
+                Text { text: qsTr("task"); color: controlPage.win.colMuted }
+                Text {
+                    Layout.columnSpan: 3
                     text: (robotState.taskType.length ? robotState.taskType : "—")
                           + " · " + robotState.taskStatus
                           + (robotState.taskId.length ? (" · " + robotState.taskId) : "")
-                    Layout.columnSpan: 3
+                    color: controlPage.win.colInk
+                    font.bold: true
                 }
             }
         }
 
         RowLayout {
             Layout.fillWidth: true
-            spacing: 16
+            spacing: 12
 
+            // ESTOP — always linked, danger style + press flash
             Button {
+                id: estopBtn
                 text: qsTr("SOFT E-STOP")
-                Layout.preferredWidth: 160
-                Layout.preferredHeight: 48
                 enabled: controlPage.canEstop
-                palette.button: "#c62828"
-                palette.buttonText: "white"
+                Layout.preferredWidth: 180
+                Layout.preferredHeight: 52
+                font.pixelSize: 16
                 font.bold: true
+                contentItem: Text {
+                    text: estopBtn.text
+                    color: "#fff"
+                    font: estopBtn.font
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalCenterAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    radius: 10
+                    color: estopBtn.pressed ? "#b71c1c"
+                         : estopBtn.hovered ? "#e53935" : "#c62828"
+                    border.color: estopBtn.pressed ? "#ff8a80" : "#ff5c5c"
+                    border.width: 2
+                    Behavior on color { ColorAnimation { duration: 100 } }
+                    scale: estopBtn.pressed ? 0.97 : 1.0
+                    Behavior on scale { NumberAnimation { duration: 80 } }
+                }
                 onClicked: estopConfirm.open()
             }
 
-            Button {
+            ToolBtn {
                 text: qsTr("Reset fault / ESTOP")
-                Layout.preferredWidth: 180
+                Layout.preferredWidth: 190
+                Layout.preferredHeight: 52
                 enabled: controlPage.linkOk && robotState.hasRobotState
                          && (robotState.estop || robotState.phase === "FAULT"
                              || robotState.phase === "DEGRADED"
                              || robotState.phase === "IDLE")
+                accent: controlPage.win.colWarn
                 onClicked: resetConfirm.open()
             }
 
             Item { Layout.fillWidth: true }
         }
 
-        Frame {
+        Rectangle {
             Layout.fillWidth: true
+            radius: 10
+            color: controlPage.win.colSurface
+            border.color: {
+                if (!robotState.lastCmdAckText.length) return controlPage.win.colBorder
+                return robotState.lastCmdOk ? controlPage.win.colOk : controlPage.win.colDanger
+            }
+            Behavior on border.color { ColorAnimation { duration: 200 } }
+            implicitHeight: ackCol.implicitHeight + 20
+
             ColumnLayout {
+                id: ackCol
                 anchors.fill: parent
-                anchors.margins: 8
+                anchors.margins: 12
                 spacing: 4
-                Label { text: qsTr("Last command ACK"); font.bold: true }
-                Label {
+                Text {
+                    text: qsTr("Last command ACK")
+                    color: controlPage.win.colMuted
+                    font.bold: true
+                }
+                Text {
                     text: robotState.lastCmdAckText.length
                           ? robotState.lastCmdAckText
                           : qsTr("(none yet)")
-                    color: robotState.lastCmdAckText.length === 0 ? palette.text
-                         : (robotState.lastCmdOk ? "#1b7f3a" : "#8a1f1f")
+                    color: robotState.lastCmdAckText.length === 0 ? controlPage.win.colMuted
+                         : (robotState.lastCmdOk ? controlPage.win.colOk : controlPage.win.colDanger)
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
-                }
-                Label {
-                    visible: controlPage.linkOk && !robotState.hasRobotState
-                    text: qsTr("Waiting for robot state — activate fake_robot + ensure bridge online")
-                    color: "#9a6b00"
-                    wrapMode: Text.Wrap
-                    Layout.fillWidth: true
+                    font.bold: true
                 }
             }
         }
@@ -241,10 +330,16 @@ Pane {
         title: qsTr("Confirm soft E-STOP")
         standardButtons: Dialog.Ok | Dialog.Cancel
         anchors.centerIn: Overlay.overlay
-        width: Math.min(parent.width - 40, 420)
-        Label {
+        width: Math.min(controlPage.width - 40, 440)
+        background: Rectangle {
+            color: controlPage.win.colSurface
+            border.color: controlPage.win.colEstop
+            radius: 10
+        }
+        contentItem: Text {
             width: parent.width
             wrapMode: Text.WordWrap
+            color: controlPage.win.colInk
             text: qsTr("Send CMD_ESTOP? Motion will stop immediately. Recovery requires Reset with no ERROR faults.")
         }
         onAccepted: connection.cmdEstop("operator")
@@ -256,10 +351,16 @@ Pane {
         title: qsTr("Confirm RESET")
         standardButtons: Dialog.Ok | Dialog.Cancel
         anchors.centerIn: Overlay.overlay
-        width: Math.min(parent.width - 40, 420)
-        Label {
+        width: Math.min(controlPage.width - 40, 440)
+        background: Rectangle {
+            color: controlPage.win.colSurface
+            border.color: controlPage.win.colWarn
+            radius: 10
+        }
+        contentItem: Text {
             width: parent.width
             wrapMode: Text.WordWrap
+            color: controlPage.win.colInk
             text: qsTr("Send CMD_RESET with confirm=true? This clears ESTOP when no ERROR fault source remains.")
         }
         onAccepted: connection.cmdReset()
