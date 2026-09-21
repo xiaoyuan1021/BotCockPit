@@ -41,6 +41,15 @@ Pane {
                 onClicked: { levelFilter = "WARN"; faultModel.setLevelFilter("WARN") }
             }
             ToolBtn {
+                text: qsTr("Copy logs")
+                accent: "#5d6b80"
+                onClicked: {
+                    logEdit.selectAll()
+                    logEdit.copy()
+                    robotState.appendLog(qsTr("logs copied to clipboard"))
+                }
+            }
+            ToolBtn {
                 text: qsTr("Inject demo fault")
                 accent: "#b07000"
                 enabled: robotState.connected && robotState.hasRobotState
@@ -48,21 +57,19 @@ Pane {
             }
         }
 
-        RowLayout {
+        Text {
             Layout.fillWidth: true
-            spacing: 8
-            Text {
-                text: qsTr("Active faults: ") + robotState.faultCount
-                      + (robotState.faultsSummary.length ? (" — " + robotState.faultsSummary) : "")
-                color: robotState.faultCount > 0 ? "#c62828" : "#5d6b80"
-                Layout.fillWidth: true
-                elide: Text.ElideRight
-            }
+            text: qsTr("Active faults: ") + robotState.faultCount
+                  + (robotState.faultsSummary.length ? (" — " + robotState.faultsSummary) : "")
+            color: robotState.faultCount > 0 ? "#c62828" : "#5d6b80"
+            elide: Text.ElideRight
         }
 
+        // Fault table — fills remaining space (no parent.height binding)
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: parent.height * 0.45
+            Layout.fillHeight: true
+            Layout.minimumHeight: 140
             radius: 10
             color: "#ffffff"
             border.color: "#cfd8e6"
@@ -131,27 +138,43 @@ Pane {
             }
         }
 
-        Text { text: qsTr("Event log"); font.bold: true; color: "#1c2430" }
+        Text {
+            text: qsTr("Event log — select text to copy, or use Copy logs")
+            font.bold: true
+            color: "#1c2430"
+        }
 
+        // Log — fixed height, selectable text (avoid height binding loop)
         Rectangle {
             Layout.fillWidth: true
-            Layout.fillHeight: true
+            Layout.preferredHeight: 170
+            Layout.maximumHeight: 220
             radius: 10
             color: "#ffffff"
             border.color: "#cfd8e6"
             clip: true
-            ListView {
+
+            Flickable {
                 anchors.fill: parent
                 anchors.margins: 8
-                model: robotState.logLines
+                contentHeight: logEdit.implicitHeight
                 clip: true
-                delegate: Text {
-                    required property string modelData
-                    text: modelData
-                    color: modelData.indexOf("NACK") >= 0 || modelData.indexOf("error") >= 0
-                           ? "#c62828" : "#1c2430"
+                boundsBehavior: Flickable.StopAtBounds
+                ScrollBar.vertical: ScrollBar {}
+
+                TextEdit {
+                    id: logEdit
+                    width: parent.width
+                    readOnly: true
+                    selectByMouse: true
+                    persistentSelection: true
+                    textFormat: TextEdit.PlainText
+                    wrapMode: TextEdit.Wrap
                     font.family: "monospace"
                     font.pixelSize: 12
+                    color: "#1c2430"
+                    text: robotState.logLines.length ? robotState.logLines.join("\n")
+                                                      : qsTr("(no events yet)")
                 }
             }
         }
@@ -172,7 +195,7 @@ Pane {
                 width: 420
                 wrapMode: Text.WordWrap
                 color: "#1c2430"
-                text: qsTr("Use tools on the robot host:\n  python3 tools/inject_fault.py\n  python3 tools/inject_fault.py --clear\n\nOr ros2 topic pub botcockpit/cmd (see WEEK3/WEEK2 docs).")
+                text: qsTr("Use tools on the robot host:\n  python3 tools/inject_fault.py\n  python3 tools/inject_fault.py --clear")
             }
         }
     }
