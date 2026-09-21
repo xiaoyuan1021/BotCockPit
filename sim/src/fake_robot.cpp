@@ -148,8 +148,10 @@ bool FakeRobot::has_error_condition() const
       return true;
     }
   }
+  // Only the robot itself (or explicit ERROR faults) force FAULT.
+  // Console/bridge offline is a safety state (ctl off), not a robot fault.
   for (const auto& n : nodes_) {
-    if (n.status == "ERROR" || n.status == "LOST") {
+    if (n.name == "fake_robot" && (n.status == "ERROR" || n.status == "LOST")) {
       return true;
     }
   }
@@ -164,7 +166,7 @@ bool FakeRobot::has_warn_condition() const
     }
   }
   for (const auto& n : nodes_) {
-    if (n.status == "WARN") {
+    if (n.name == "fake_robot" && n.status == "WARN") {
       return true;
     }
   }
@@ -193,7 +195,6 @@ void FakeRobot::recompute_phase_and_control()
     return;
   }
   if (has_warn_condition()) {
-    // Non-critical abnormal → DEGRADED, no new tasks (PROTOCOL phase table).
     if (phase_ != "RUNNING") {
       phase_ = "DEGRADED";
     }
@@ -203,15 +204,15 @@ void FakeRobot::recompute_phase_and_control()
   }
   nodes_[0].status = "OK";
   if (phase_ == "FAULT" || phase_ == "DEGRADED" || phase_ == "ESTOP") {
-    // Recovery requires explicit state; tick may leave to IDLE when clean.
     if (!estop_ && !has_error_condition() && !has_warn_condition()) {
       phase_ = "IDLE";
     }
   }
+  // New tasks only in IDLE with live console link (PROTOCOL safety).
   if (phase_ == "IDLE") {
     control_enabled_ = console_online_;
   } else if (phase_ == "RUNNING") {
-    control_enabled_ = false;  // no new tasks while busy
+    control_enabled_ = false;
   }
 }
 
@@ -329,7 +330,8 @@ void FakeRobot::on_console(const std_msgs::msg::String::SharedPtr msg)
     last_console_ms_ = now_ms();
     nodes_[1].status = "OK";
   } else {
-    nodes_[1].status = "LOST";
+    // Console link lost → safety stop + ctl off; not a robot ERROR fault.
+    nodes_[1].status = "WARN";
     if (phase_ == "RUNNING") {
       apply_safety_stop("console offline");
     }
@@ -358,7 +360,7 @@ void FakeRobot::tick()
   if (console_online_ && last_console_ms_ > 0 &&
       now_ms() - last_console_ms_ > 3000) {
     console_online_ = false;
-    nodes_[1].status = "LOST";
+    nodes_[1].status = "WARN";
     if (phase_ == "RUNNING") {
       apply_safety_stop("console heartbeat lost");
     }
@@ -426,11 +428,10 @@ std::string FakeRobot::build_state_json() const
     conn = "ESTOP";
   } else if (phase_ == "FAULT") {
     conn = "OFFLINE";
-  } else if (phase_ == "DEGRADED" || !console_online_) {
+  } else if (!console_online_) {
+    conn = "OFFLINE";
+  } else if (phase_ == "DEGRADED") {
     conn = "DEGRADED";
-    if (!console_online_) {
-      conn = "OFFLINE";
-    }
   }
 
   oss << "{";
@@ -611,7 +612,9 @@ void FakeRobot::on_cmd(const std_msgs::msg::String::SharedPtr msg)
     estop_ = false;
     clear_faults();
     if (!console_online_) {
-      nodes_[1].status = "LOST";
+      nodes_[1].status = "WARN";
+    } else {
+      nodes_[1].status = "OK";
     }
     phase_ = "IDLE";
     mode_ = "TELEOP";
@@ -738,9 +741,7 @@ void FakeRobot::on_cmd(const std_msgs::msg::String::SharedPtr msg)
 
   if (cmd == "CLEAR_FAULT" || cmd == "CMD_CLEAR_FAULT") {
     clear_faults();
-    if (!console_online_) {
-      nodes_[1].status = "LOST";
-    }
+    nodes_[1].status = console_online_ ? "OK" : "WARN";
     recompute_phase_and_control();
     if (phase_ == "FAULT" && !has_error_condition()) {
       phase_ = "IDLE";
