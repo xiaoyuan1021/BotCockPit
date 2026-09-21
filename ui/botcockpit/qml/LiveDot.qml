@@ -6,12 +6,12 @@ Item {
     id: root
     property color base: "#0f8a4a"
     property bool active: true
-    readonly property var win: Window.window
     width: 12
     height: 12
 
     function idleColor() {
-        return (win && win.colMuted) ? win.colMuted : "#5d6b80"
+        var w = Window.window
+        return (w && w.colMuted !== undefined) ? w.colMuted : "#5d6b80"
     }
 
     Rectangle {
@@ -22,8 +22,6 @@ Item {
         radius: 4
         color: root.active ? root.base : root.idleColor()
         opacity: root.active ? 1.0 : 0.45
-        border.color: (win && win.colBorder) ? win.colBorder : "#cfd8e6"
-        border.width: root.active ? 0 : 1
     }
     Rectangle {
         anchors.centerIn: parent
@@ -33,7 +31,7 @@ Item {
         color: core.color
         opacity: 0
         visible: root.active
-        scale: 1
+        scale: 1.0
         SequentialAnimation on opacity {
             running: root.visible && root.active
             loops: Animation.Infinite

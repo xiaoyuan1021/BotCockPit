@@ -4,40 +4,48 @@ import QtQuick.Controls
 
 Button {
     id: btn
-    property color accent: (Window.window && Window.window.colAccent) ? Window.window.colAccent : "#1a6fd4"
+
+    property color accent: "#1a6fd4"
+
     leftPadding: 14
     rightPadding: 14
     topPadding: 8
     bottomPadding: 8
     font.bold: true
 
-    readonly property color ink: (Window.window && Window.window.colInk) ? Window.window.colInk : "#1c2430"
-    readonly property color muted: (Window.window && Window.window.colMuted) ? Window.window.colMuted : "#5d6b80"
-    readonly property color alt: (Window.window && Window.window.colSurfaceAlt) ? Window.window.colSurfaceAlt : "#e8eef6"
-    readonly property color borderCol: (Window.window && Window.window.colBorder) ? Window.window.colBorder : "#cfd8e6"
+    // Resolve colors safely (avoid TypeError when Window is not ready)
+    function wColor(name, fallback) {
+        var w = Window.window
+        if (w && w[name] !== undefined)
+            return w[name]
+        return fallback
+    }
 
     contentItem: Text {
         text: btn.text
         font: btn.font
-        color: btn.enabled ? btn.ink : btn.muted
+        color: btn.enabled ? btn.wColor("colInk", "#1c2430") : btn.wColor("colMuted", "#5d6b80")
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
-        opacity: btn.down ? 0.85 : 1.0
-        Behavior on opacity { NumberAnimation { duration: 90 } }
     }
+
     background: Rectangle {
         implicitHeight: 34
         radius: 8
         color: {
-            if (!btn.enabled) return btn.alt
-            if (btn.down) return Qt.darker(btn.accent, 1.2)
-            if (btn.hovered) return Qt.light(btn.accent, 1.55)
-            return btn.alt
+            var alt = btn.wColor("colSurfaceAlt", "#e8eef6")
+            if (!btn.enabled)
+                return alt
+            if (btn.pressed)
+                return "#c5daf0"
+            if (btn.hovered)
+                return "#d7e6f8"
+            return alt
         }
-        border.color: btn.enabled ? btn.accent : btn.borderCol
+        border.color: btn.enabled ? btn.accent : btn.wColor("colBorder", "#cfd8e6")
         border.width: 1
-        Behavior on color { ColorAnimation { duration: 120 } }
     }
-    Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
-    scale: down ? 0.97 : 1.0
+
+    scale: btn.pressed ? 0.97 : 1.0
+    Behavior on scale { NumberAnimation { duration: 80 } }
 }
