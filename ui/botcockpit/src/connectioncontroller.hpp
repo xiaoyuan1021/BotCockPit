@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QObject>
+#include <QTimer>
 #include <QThread>
 #include <QVariantList>
 #include <QVariantMap>
@@ -9,8 +10,6 @@ class RobotState;
 class NodeTableModel;
 class SocketWorker;
 
-// UI-thread facade. Socket lives in SocketWorker on a worker QThread.
-// Protocol encode/decode stays in C++ — QML only calls these invokables.
 class ConnectionController : public QObject
 {
     Q_OBJECT
@@ -24,7 +23,7 @@ public:
 
     Q_INVOKABLE void cmdMode(const QString& mode);
     Q_INVOKABLE void cmdTaskGoto(const QString& taskId, double x, double y);
-    Q_INVOKABLE void cmdTaskSimple(const QString& type);  // pause/resume/cancel
+    Q_INVOKABLE void cmdTaskSimple(const QString& type);
     Q_INVOKABLE void cmdEstop(const QString& reason);
     Q_INVOKABLE void cmdReset();
 
@@ -46,10 +45,18 @@ private slots:
     void onRtt(int ms);
     void onCmdAck(const QVariantMap& ack);
     void onError(const QString& message);
+    void onReconnectTimer();
 
 private:
+    void scheduleReconnect(const QString& why);
+
     RobotState* state_ = nullptr;
     NodeTableModel* nodes_ = nullptr;
     QThread worker_thread_;
     SocketWorker* worker_ = nullptr;
+    QTimer reconnect_timer_;
+    QString last_host_;
+    int last_port_ = 8765;
+    int backoff_s_ = 1;
+    bool manual_disconnect_ = false;
 };

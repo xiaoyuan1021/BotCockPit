@@ -40,7 +40,7 @@ class ConsoleBeater:
         self._stop = True
 
 
-def lifecycle_configure_activate(node, node_name: str = "fake_robot", timeout: float = 5.0) -> bool:
+def lifecycle_configure_activate(node, node_name: str = "fake_robot", timeout: float = 8.0) -> bool:
     from lifecycle_msgs.msg import Transition
     from lifecycle_msgs.srv import ChangeState
     import rclpy
@@ -50,13 +50,17 @@ def lifecycle_configure_activate(node, node_name: str = "fake_robot", timeout: f
         return False
 
     def _call(transition_id: int) -> bool:
-        req = ChangeState.Request()
-        req.transition.id = transition_id
-        future = client.call_async(req)
-        deadline = time.time() + timeout
-        while time.time() < deadline and not future.done():
-            rclpy.spin_once(node, timeout_sec=0.05)
-        return future.done() and future.result() is not None and future.result().success
+        for _ in range(3):
+            req = ChangeState.Request()
+            req.transition.id = transition_id
+            future = client.call_async(req)
+            deadline = time.time() + timeout
+            while time.time() < deadline and not future.done():
+                rclpy.spin_once(node, timeout_sec=0.05)
+            if future.done() and future.result() is not None and future.result().success:
+                return True
+            time.sleep(0.2)
+        return False
 
     return _call(Transition.TRANSITION_CONFIGURE) and _call(Transition.TRANSITION_ACTIVATE)
 

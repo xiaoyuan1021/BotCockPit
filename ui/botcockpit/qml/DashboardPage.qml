@@ -98,8 +98,9 @@ Pane {
                 radius: 10
                 color: pane.win.colSurface
                 border.color: pane.win.colBorder
-                implicitHeight: keyGrid.implicitHeight + 24
+                implicitHeight: poseGrid.implicitHeight + 24
                 GridLayout {
+                    id: poseGrid
                     anchors.fill: parent
                     anchors.margins: 12
                     columns: 4
@@ -183,7 +184,7 @@ Pane {
                     width: nodeView.width
                     height: 34
                     radius: 6
-                    color: index % 2 === 0 ? Qt.rgba(1,1,1,0.02) : "transparent"
+                    color: index % 2 === 0 ? "#f7f9fc" : "#ffffff"
                     required property string name
                     required property string status
                     required property var lastHbMs

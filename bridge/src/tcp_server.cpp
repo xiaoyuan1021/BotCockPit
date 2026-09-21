@@ -6,6 +6,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <sstream>
@@ -193,9 +194,21 @@ void TcpServer::client_loop(std::shared_ptr<Client> client)
     }
     client->last_rx_ms = now_ms();
     client->decoder.append(buf, static_cast<size_t>(n));
+    // Drain all complete frames; process ESTOP first (PROTOCOL §7.1 priority)
+    // within this batch so an urgent stop is not stuck behind other cmds.
+    std::vector<Frame> batch;
     Frame frame;
     while (client->decoder.next(frame)) {
-      handle_frame(client, frame);
+      batch.push_back(frame);
+    }
+    std::stable_sort(batch.begin(), batch.end(),
+                     [](const Frame& a, const Frame& b) {
+                       const bool ae = (a.type == MSG_CMD_ESTOP) != 0;
+                       const bool be = (b.type == MSG_CMD_ESTOP) != 0;
+                       return ae > be;  // ESTOP first
+                     });
+    for (const Frame& f : batch) {
+      handle_frame(client, f);
       if (client->fd.load() < 0) {
         break;
       }

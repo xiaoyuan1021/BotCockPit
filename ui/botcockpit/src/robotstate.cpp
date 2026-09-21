@@ -1,6 +1,37 @@
 #include "robotstate.hpp"
 
+#include <QDateTime>
+
 RobotState::RobotState(QObject* parent) : QObject(parent) {}
+
+void RobotState::setAutoReconnect(bool v)
+{
+    if (auto_reconnect_ == v) {
+        return;
+    }
+    auto_reconnect_ = v;
+    emit autoReconnectChanged();
+}
+
+void RobotState::setReconnectAttempts(int n)
+{
+    if (reconnect_attempts_ == n) {
+        return;
+    }
+    reconnect_attempts_ = n;
+    emit reconnectAttemptsChanged();
+}
+
+void RobotState::appendLog(const QString& line)
+{
+    const QString stamped =
+        QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss")) + QLatin1String("  ") + line;
+    log_lines_.prepend(stamped);
+    while (log_lines_.size() > 80) {
+        log_lines_.removeLast();
+    }
+    emit logLinesChanged();
+}
 
 void RobotState::setLastCmdAck(const QVariantMap& ack)
 {
@@ -240,11 +271,18 @@ void RobotState::applyState(const QVariantMap& map)
         const QVariantList fl = faults.toList();
         fault_count_ = fl.size();
         QStringList parts;
+        QVariantList copy;
+        copy.reserve(fl.size());
         for (const QVariant& item : fl) {
+            copy.append(item);
             const QVariantMap fm = item.toMap();
             parts << fm.value(QStringLiteral("code")).toString();
         }
         faults_summary_ = parts.join(QStringLiteral(", "));
+        if (copy != faults_list_) {
+            faults_list_ = copy;
+            emit faultsListChanged();
+        }
         emit faultsChanged();
     }
 }

@@ -15,6 +15,10 @@ ConnectionController::ConnectionController(RobotState* state,
     worker_->moveToThread(&worker_thread_);
     connect(&worker_thread_, &QThread::finished, worker_, &QObject::deleteLater);
 
+    reconnect_timer_.setSingleShot(true);
+    connect(&reconnect_timer_, &QTimer::timeout, this,
+            &ConnectionController::onReconnectTimer);
+
     connect(this, &ConnectionController::startWorker, worker_,
             &SocketWorker::connectToHost);
     connect(this, &ConnectionController::stopWorker, worker_,
@@ -50,6 +54,8 @@ ConnectionController::ConnectionController(RobotState* state,
 
 ConnectionController::~ConnectionController()
 {
+    manual_disconnect_ = true;
+    reconnect_timer_.stop();
     if (worker_thread_.isRunning() && worker_) {
         QMetaObject::invokeMethod(worker_, "disconnectFromHost",
                                   Qt::BlockingQueuedConnection);
@@ -66,17 +72,29 @@ void ConnectionController::connectToServer(const QString& host, int port)
     if (!state_) {
         return;
     }
+    manual_disconnect_ = false;
+    backoff_s_ = 1;
+    reconnect_timer_.stop();
     if (state_->connected() || state_->connecting()) {
         return;
     }
+    last_host_ = host;
+    last_port_ = port;
     state_->setEndpoint(host, port);
     state_->setConnecting(true);
     state_->setErrorString(QString());
+    state_->appendLog(tr("connect %1:%2").arg(host).arg(port));
     emit startWorker(host, port);
 }
 
 void ConnectionController::disconnectFromServer()
 {
+    manual_disconnect_ = true;
+    reconnect_timer_.stop();
+    if (state_) {
+        state_->setReconnectAttempts(0);
+        state_->appendLog(tr("manual disconnect"));
+    }
     emit stopWorker();
 }
 
@@ -84,6 +102,9 @@ void ConnectionController::cmdMode(const QString& mode)
 {
     if (state_ && !state_->connected()) {
         return;
+    }
+    if (state_) {
+        state_->appendLog(tr("CMD_MODE %1").arg(mode));
     }
     emit workerCmdMode(mode);
 }
@@ -93,6 +114,9 @@ void ConnectionController::cmdTaskGoto(const QString& taskId, double x, double y
     if (state_ && !state_->connected()) {
         return;
     }
+    if (state_) {
+        state_->appendLog(tr("CMD_TASK goto id=%1 (%2,%3)").arg(taskId).arg(x).arg(y));
+    }
     emit workerCmdTask(taskId, QStringLiteral("goto"), x, y, 30.0);
 }
 
@@ -100,6 +124,9 @@ void ConnectionController::cmdTaskSimple(const QString& type)
 {
     if (state_ && !state_->connected()) {
         return;
+    }
+    if (state_) {
+        state_->appendLog(tr("CMD_TASK %1").arg(type));
     }
     emit workerCmdTask(QString(), type, 0.0, 0.0, 0.0);
 }
@@ -109,6 +136,9 @@ void ConnectionController::cmdEstop(const QString& reason)
     if (state_ && !state_->connected()) {
         return;
     }
+    if (state_) {
+        state_->appendLog(tr("CMD_ESTOP %1").arg(reason));
+    }
     emit workerCmdEstop(reason);
 }
 
@@ -117,7 +147,41 @@ void ConnectionController::cmdReset()
     if (state_ && !state_->connected()) {
         return;
     }
+    if (state_) {
+        state_->appendLog(tr("CMD_RESET"));
+    }
     emit workerCmdReset();
+}
+
+void ConnectionController::scheduleReconnect(const QString& why)
+{
+    if (!state_ || manual_disconnect_ || !state_->autoReconnect()) {
+        return;
+    }
+    if (last_host_.isEmpty()) {
+        return;
+    }
+    state_->setReconnectAttempts(state_->reconnectAttempts() + 1);
+    const int delay = backoff_s_;
+    backoff_s_ = qMin(backoff_s_ * 2, 10);
+    state_->appendLog(tr("reconnect in %1s (%2) — %3")
+                          .arg(delay)
+                          .arg(state_->reconnectAttempts())
+                          .arg(why));
+    reconnect_timer_.start(delay * 1000);
+}
+
+void ConnectionController::onReconnectTimer()
+{
+    if (!state_ || manual_disconnect_) {
+        return;
+    }
+    if (state_->connected()) {
+        return;
+    }
+    state_->setConnecting(true);
+    state_->setErrorString(QString());
+    emit startWorker(last_host_, last_port_);
 }
 
 void ConnectionController::onConnected()
@@ -125,9 +189,12 @@ void ConnectionController::onConnected()
     if (!state_) {
         return;
     }
+    backoff_s_ = 1;
+    reconnect_timer_.stop();
     state_->setConnecting(false);
     state_->setConnected(true);
     state_->setErrorString(QString());
+    state_->appendLog(tr("TCP connected, waiting HELLO…"));
 }
 
 void ConnectionController::onDisconnected()
@@ -141,6 +208,8 @@ void ConnectionController::onDisconnected()
     if (nodes_) {
         nodes_->setNodes({});
     }
+    state_->appendLog(tr("disconnected"));
+    scheduleReconnect(QStringLiteral("disconnect"));
 }
 
 void ConnectionController::onHelloAck(const QVariantMap& info)
@@ -150,12 +219,17 @@ void ConnectionController::onHelloAck(const QVariantMap& info)
     }
     const bool ok = info.value(QStringLiteral("ok")).toBool();
     if (!ok) {
-        state_->setErrorString(
-            info.value(QStringLiteral("reason")).toString());
+        const QString reason = info.value(QStringLiteral("reason")).toString();
+        state_->setErrorString(reason);
+        state_->appendLog(tr("HELLO rejected: %1").arg(reason));
         return;
     }
     state_->setHelloInfo(info.value(QStringLiteral("proto")).toString(),
                          info.value(QStringLiteral("server")).toString());
+    state_->setReconnectAttempts(0);
+    backoff_s_ = 1;
+    state_->appendLog(tr("HELLO_ACK proto=%1 server=%2")
+                          .arg(state_->proto(), state_->server()));
 }
 
 void ConnectionController::onState(const QVariantMap& state)
@@ -183,6 +257,12 @@ void ConnectionController::onCmdAck(const QVariantMap& ack)
 {
     if (state_) {
         state_->setLastCmdAck(ack);
+        const QString cmd = ack.value(QStringLiteral("cmd")).toString();
+        const bool ok = ack.value(QStringLiteral("ok")).toBool();
+        const QString reason = ack.value(QStringLiteral("reason")).toString();
+        state_->appendLog(tr("ACK %1 %2%3")
+                              .arg(cmd, ok ? QStringLiteral("OK") : QStringLiteral("NACK"),
+                                   reason.isEmpty() ? QString() : (QStringLiteral(" ") + reason)));
     }
 }
 
@@ -195,4 +275,6 @@ void ConnectionController::onError(const QString& message)
     state_->setConnected(false);
     state_->setErrorString(message);
     state_->resetRemote();
+    state_->appendLog(tr("error: %1").arg(message));
+    scheduleReconnect(message);
 }

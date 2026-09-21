@@ -2,6 +2,8 @@
 
 #include <QObject>
 #include <QString>
+#include <QStringList>
+#include <QVariantList>
 #include <QVariantMap>
 
 // QML-facing robot snapshot. No protocol decode here — ConnectionController
@@ -35,6 +37,10 @@ class RobotState : public QObject
     Q_PROPERTY(int faultCount READ faultCount NOTIFY faultsChanged)
     Q_PROPERTY(QString lastCmdAckText READ lastCmdAckText NOTIFY lastCmdAckChanged)
     Q_PROPERTY(bool lastCmdOk READ lastCmdOk NOTIFY lastCmdAckChanged)
+    Q_PROPERTY(QVariantList faultsList READ faultsList NOTIFY faultsListChanged)
+    Q_PROPERTY(QStringList logLines READ logLines NOTIFY logLinesChanged)
+    Q_PROPERTY(bool autoReconnect READ autoReconnect WRITE setAutoReconnect NOTIFY autoReconnectChanged)
+    Q_PROPERTY(int reconnectAttempts READ reconnectAttempts NOTIFY reconnectAttemptsChanged)
 
 public:
     explicit RobotState(QObject* parent = nullptr);
@@ -65,6 +71,14 @@ public:
     int faultCount() const { return fault_count_; }
     QString lastCmdAckText() const { return last_cmd_ack_text_; }
     bool lastCmdOk() const { return last_cmd_ok_; }
+    QVariantList faultsList() const { return faults_list_; }
+    QStringList logLines() const { return log_lines_; }
+    bool autoReconnect() const { return auto_reconnect_; }
+    void setAutoReconnect(bool v);
+    int reconnectAttempts() const { return reconnect_attempts_; }
+
+    Q_INVOKABLE void appendLog(const QString& line);
+    void setReconnectAttempts(int n);
 
     void setLastCmdAck(const QVariantMap& ack);
 
@@ -98,6 +112,10 @@ signals:
     void taskChanged();
     void faultsChanged();
     void lastCmdAckChanged();
+    void faultsListChanged();
+    void logLinesChanged();
+    void autoReconnectChanged();
+    void reconnectAttemptsChanged();
 
 private:
     bool connected_ = false;
@@ -126,4 +144,8 @@ private:
     int fault_count_ = 0;
     QString last_cmd_ack_text_;
     bool last_cmd_ok_ = false;
+    QVariantList faults_list_;
+    QStringList log_lines_;
+    bool auto_reconnect_ = true;
+    int reconnect_attempts_ = 0;
 };

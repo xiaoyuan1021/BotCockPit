@@ -5,13 +5,12 @@ import QtQuick.Layouts
 
 ApplicationWindow {
     id: root
-    width: 1080
-    height: 720
+    width: 1100
+    height: 740
     visible: true
     title: qsTr("BotCockpit — ROS2 Robot Console")
     color: "#f3f5f9"
 
-    // Light industrial lab palette
     property color colBg: "#f3f5f9"
     property color colSurface: "#ffffff"
     property color colSurfaceAlt: "#e8eef6"
@@ -26,6 +25,8 @@ ApplicationWindow {
     property color colEstop: "#c62828"
 
     property int currentPage: 0
+    // scale UI density slightly with window for week3 experience
+    readonly property real uiScale: Math.max(0.92, Math.min(1.08, height / 740.0))
 
     font.family: "Segoe UI, Ubuntu, Noto Sans CJK SC, sans-serif"
     font.pixelSize: 13
@@ -49,7 +50,6 @@ ApplicationWindow {
             anchors.rightMargin: 12
             spacing: 12
 
-            // Brand
             Row {
                 spacing: 8
                 Layout.alignment: Qt.AlignVCenter
@@ -83,18 +83,18 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Layout.alignment: Qt.AlignVCenter
                 background: Item {}
-                TabButton { text: qsTr("Connect"); width: implicitWidth + 24 }
-                TabButton { text: qsTr("Dashboard"); width: implicitWidth + 24 }
-                TabButton { text: qsTr("Control"); width: implicitWidth + 24 }
+                TabButton { text: qsTr("Connect"); width: implicitWidth + 20 }
+                TabButton { text: qsTr("Dashboard"); width: implicitWidth + 20 }
+                TabButton { text: qsTr("Control"); width: implicitWidth + 20 }
+                TabButton { text: qsTr("Fault"); width: implicitWidth + 20 }
+                TabButton { text: qsTr("Settings"); width: implicitWidth + 20 }
                 onCurrentIndexChanged: {
                     root.currentPage = currentIndex
                     fadeAnim.restart()
                 }
             }
 
-            // Link status — keep on one line, not clipped
             Row {
-                id: linkRow
                 spacing: 8
                 Layout.alignment: Qt.AlignVCenter
                 Layout.minimumWidth: linkText.implicitWidth + 22
@@ -117,23 +117,16 @@ ApplicationWindow {
                 }
             }
 
-            // Phase chip — full text, no truncation
             Rectangle {
-                id: phaseChip
                 Layout.alignment: Qt.AlignVCenter
                 Layout.preferredWidth: phaseLabel.implicitWidth + 20
-                Layout.maximumWidth: 220
+                Layout.maximumWidth: 200
                 height: 34
                 radius: 8
                 color: root.colSurfaceAlt
-                border.color: {
-                    if (robotState.estop) return root.colEstop
-                    if (!robotState.connected) return root.colBorder
-                    return robotState.controlEnabled ? root.colOk : root.colWarn
-                }
-                border.width: 1
-                Behavior on border.color { ColorAnimation { duration: 180 } }
-
+                border.color: robotState.estop ? root.colEstop
+                             : (!robotState.connected ? root.colBorder
+                                : (robotState.controlEnabled ? root.colOk : root.colWarn))
                 Text {
                     id: phaseLabel
                     anchors.centerIn: parent
@@ -142,16 +135,13 @@ ApplicationWindow {
                     text: {
                         if (!robotState.connected) return qsTr("OFFLINE")
                         if (robotState.estop) return qsTr("ESTOP")
-                        // short form so chip always fits
-                        var p = robotState.phase
-                        return robotState.controlEnabled ? p : (p + " · ctl off")
+                        return robotState.controlEnabled ? robotState.phase
+                             : (robotState.phase + " · ctl off")
                     }
-                    color: {
-                        if (!robotState.connected) return root.colMuted
-                        if (robotState.estop) return root.colEstop
-                        if (robotState.phase === "RUNNING") return root.colRunning
-                        return root.colInk
-                    }
+                    color: !robotState.connected ? root.colMuted
+                         : robotState.estop ? root.colEstop
+                         : robotState.phase === "RUNNING" ? root.colRunning
+                         : root.colInk
                     font.bold: true
                     font.pixelSize: 12
                     elide: Text.ElideRight
@@ -181,6 +171,8 @@ ApplicationWindow {
             ConnectPage {}
             DashboardPage {}
             ControlPage {}
+            FaultPage {}
+            SettingsPage {}
         }
     }
 
@@ -195,6 +187,15 @@ ApplicationWindow {
             text: robotState.connected
                   ? ("proto " + robotState.proto + " · " + robotState.server)
                   : (robotState.errorString !== "" ? robotState.errorString : qsTr("Ready"))
+            color: root.colMuted
+            font.pixelSize: 12
+        }
+        Text {
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.right: parent.right
+            anchors.rightMargin: 14
+            visible: robotState.autoReconnect && !robotState.connected
+            text: qsTr("auto-reconnect on")
             color: root.colMuted
             font.pixelSize: 12
         }
