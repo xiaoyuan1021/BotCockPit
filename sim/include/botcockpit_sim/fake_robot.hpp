@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "botcockpit_sim/nav.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_lifecycle/lifecycle_node.hpp"
 #include "std_msgs/msg/string.hpp"
@@ -91,6 +92,13 @@ class FakeRobot : public rclcpp_lifecycle::LifecycleNode {
 
   std::vector<NodeHealth> nodes_;
   std::vector<FaultItem> faults_;
+
+  // Plan A navigation
+  nav::GridMap nav_map_{};
+  std::vector<std::pair<double, double>> nav_path_;
+  size_t nav_idx_ = 0;
+  std::string nav_status_ = "IDLE";  // IDLE/PLANNING/TRACKING/FAILED
+  bool nav_ready_ = false;
 
   std::chrono::steady_clock::time_point idle_tp_{};
   std::chrono::steady_clock::time_point last_tick_tp_{};

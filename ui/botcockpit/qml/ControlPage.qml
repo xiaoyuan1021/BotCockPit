@@ -88,6 +88,14 @@ Pane {
                     color: "#ffffff"
                     font.bold: true
                 }
+                Text {
+                    visible: robotState.navStatus !== "IDLE"
+                    text: qsTr("NAV: ") + robotState.navStatus
+                          + (robotState.navPathLen ? (" · " + robotState.navPathLen + " wp") : "")
+                    color: "#ffffff"
+                    font.bold: true
+                    font.pixelSize: 14
+                }
             }
         }
 

@@ -161,6 +161,11 @@ void ConnectionController::scheduleReconnect(const QString& why)
     if (last_host_.isEmpty()) {
         return;
     }
+    // Single-flight: do not stack timers / inflate backoff twice
+    if (reconnect_pending_ && reconnect_timer_.isActive()) {
+        return;
+    }
+    reconnect_pending_ = true;
     state_->setReconnectAttempts(state_->reconnectAttempts() + 1);
     const int delay = backoff_s_;
     backoff_s_ = qMin(backoff_s_ * 2, 10);
@@ -173,6 +178,7 @@ void ConnectionController::scheduleReconnect(const QString& why)
 
 void ConnectionController::onReconnectTimer()
 {
+    reconnect_pending_ = false;
     if (!state_ || manual_disconnect_) {
         return;
     }
@@ -181,6 +187,7 @@ void ConnectionController::onReconnectTimer()
     }
     state_->setConnecting(true);
     state_->setErrorString(QString());
+    hello_ok_session_ = false;
     emit startWorker(last_host_, last_port_);
 }
 
@@ -189,10 +196,12 @@ void ConnectionController::onConnected()
     if (!state_) {
         return;
     }
-    backoff_s_ = 1;
+    // TCP up != protocol session up; backoff resets only after HELLO_ACK.
     reconnect_timer_.stop();
-    state_->setConnecting(false);
-    state_->setConnected(true);
+    reconnect_pending_ = false;
+    hello_ok_session_ = false;
+    state_->setConnecting(true);
+    state_->setConnected(false);  // fail-closed until HELLO_ACK ok
     state_->setErrorString(QString());
     state_->appendLog(tr("TCP connected, waiting HELLO…"));
 }
@@ -202,6 +211,8 @@ void ConnectionController::onDisconnected()
     if (!state_) {
         return;
     }
+    const bool was_hello = hello_ok_session_;
+    hello_ok_session_ = false;
     state_->setConnecting(false);
     state_->setConnected(false);
     state_->resetRemote();
@@ -209,7 +220,12 @@ void ConnectionController::onDisconnected()
         nodes_->setNodes({});
     }
     state_->appendLog(tr("disconnected"));
-    scheduleReconnect(QStringLiteral("disconnect"));
+    if (!was_hello && !manual_disconnect_) {
+        // TCP-level flapping without session — keep backoff growth
+        scheduleReconnect(QStringLiteral("tcp/protocol disconnect"));
+    } else {
+        scheduleReconnect(QStringLiteral("disconnect"));
+    }
 }
 
 void ConnectionController::onHelloAck(const QVariantMap& info)
@@ -222,12 +238,25 @@ void ConnectionController::onHelloAck(const QVariantMap& info)
         const QString reason = info.value(QStringLiteral("reason")).toString();
         state_->setErrorString(reason);
         state_->appendLog(tr("HELLO rejected: %1").arg(reason));
+        hello_ok_session_ = false;
+        state_->setConnected(false);
+        state_->setConnecting(false);
+        // Fail closed: tear down socket, do not claim ONLINE
+        manual_disconnect_ = false;  // allow auto-reconnect after handshake fail
+        emit stopWorker();
+        scheduleReconnect(QStringLiteral("hello rejected"));
         return;
     }
     state_->setHelloInfo(info.value(QStringLiteral("proto")).toString(),
                          info.value(QStringLiteral("server")).toString());
+    hello_ok_session_ = true;
+    reconnect_pending_ = false;
+    reconnect_timer_.stop();
     state_->setReconnectAttempts(0);
-    backoff_s_ = 1;
+    backoff_s_ = 1;  // reset only on successful session
+    state_->setConnecting(false);
+    state_->setConnected(true);
+    state_->setErrorString(QString());
     state_->appendLog(tr("HELLO_ACK proto=%1 server=%2")
                           .arg(state_->proto(), state_->server()));
 }
@@ -271,10 +300,11 @@ void ConnectionController::onError(const QString& message)
     if (!state_) {
         return;
     }
+    hello_ok_session_ = false;
     state_->setConnecting(false);
     state_->setConnected(false);
     state_->setErrorString(message);
     state_->resetRemote();
     state_->appendLog(tr("error: %1").arg(message));
-    scheduleReconnect(message);
+    // disconnect signal will schedule reconnect once — avoid double backoff
 }

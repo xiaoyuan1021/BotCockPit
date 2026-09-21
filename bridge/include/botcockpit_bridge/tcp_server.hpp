@@ -1,7 +1,9 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -13,25 +15,25 @@
 
 namespace botcockpit {
 
-// Blocking TCP server for protocol v0.1. Handles sticky/half frames.
 class TcpServer {
  public:
-  // Latest robot state JSON (without conn/rtt injection).
   using StateProvider = std::function<std::string()>;
-  // cmd_name e.g. "CMD_ESTART"; payload JSON; returns CMD_ACK payload JSON.
-  // Must not block for long; bridge_node may wait on a future.
   using CommandHandler =
       std::function<std::string(const std::string& cmd_name, uint16_t seq,
                                 const std::string& payload)>;
+  // Non-blocking urgent path (ESTOP): publish ROS immediately, ACK later.
+  using UrgentHandler =
+      std::function<void(const std::string& cmd_name, uint16_t seq,
+                         const std::string& payload)>;
   using LogFn = std::function<void(const std::string& line)>;
 
-  TcpServer(StateProvider state_provider, CommandHandler cmd_handler, LogFn log);
+  TcpServer(StateProvider state_provider, CommandHandler cmd_handler,
+            UrgentHandler urgent_handler, LogFn log);
   ~TcpServer();
 
   TcpServer(const TcpServer&) = delete;
   TcpServer& operator=(const TcpServer&) = delete;
 
-  // Bind 0.0.0.0:port and start accept thread. Returns false on bind failure.
   bool start(int port);
   void stop();
 
@@ -39,10 +41,10 @@ class TcpServer {
   int port() const { return port_; }
   size_t client_count() const;
 
-  // Broadcast STATE_DELTA (full snapshot body is allowed in week 1).
   void broadcast_state_delta();
-
   void set_state_provider(StateProvider fn);
+  // Called from bridge ROS callback to complete async ESTOP ACK.
+  void complete_async_ack(uint16_t seq, const std::string& ack_json);
 
  private:
   struct Client {
@@ -55,9 +57,20 @@ class TcpServer {
     std::mutex send_mu;
   };
 
+  struct CmdJob {
+    std::shared_ptr<Client> client;
+    uint16_t seq = 0;
+    std::string cmd_name;
+    std::string payload;
+    bool urgent = false;
+  };
+
   void accept_loop();
   void client_loop(std::shared_ptr<Client> client);
   void handle_frame(const std::shared_ptr<Client>& client, const Frame& frame);
+  void enqueue_cmd(const std::shared_ptr<Client>& client, const Frame& frame,
+                   const std::string& cmd_name);
+  void cmd_worker_loop();
   bool send_frame(const std::shared_ptr<Client>& client, uint8_t type,
                   uint8_t flags, uint16_t seq, const std::string& payload);
   void remove_client(int fd);
@@ -69,6 +82,7 @@ class TcpServer {
 
   StateProvider state_provider_;
   CommandHandler cmd_handler_;
+  UrgentHandler urgent_handler_;
   LogFn log_;
 
   int listen_fd_ = -1;
@@ -76,6 +90,11 @@ class TcpServer {
   std::atomic<bool> running_{false};
   std::thread accept_thread_;
   std::thread watchdog_thread_;
+  std::thread cmd_thread_;
+
+  std::mutex queue_mu_;
+  std::condition_variable queue_cv_;
+  std::deque<CmdJob> cmd_queue_;
 
   mutable std::mutex clients_mu_;
   std::vector<std::shared_ptr<Client>> clients_;

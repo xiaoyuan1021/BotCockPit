@@ -285,4 +285,16 @@ void RobotState::applyState(const QVariantMap& map)
         }
         emit faultsChanged();
     }
+
+    const QVariant nav = map.value(QStringLiteral("nav"));
+    if (nav.canConvert<QVariantMap>()) {
+        const QVariantMap nm = nav.toMap();
+        const QString st = nm.value(QStringLiteral("status")).toString();
+        const int plen = nm.value(QStringLiteral("path_len")).toInt();
+        if (st != nav_status_ || plen != nav_path_len_) {
+            nav_status_ = st.isEmpty() ? QStringLiteral("IDLE") : st;
+            nav_path_len_ = plen;
+            emit navStatusChanged();
+        }
+    }
 }

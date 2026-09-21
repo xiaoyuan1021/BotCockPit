@@ -23,7 +23,6 @@ class BridgeNode : public rclcpp::Node {
   bool start_tcp(int port);
   void stop_tcp();
 
-  // JSON for TCP clients: ONLINE/ESTOP/... from robot when fresh, else OFFLINE.
   std::string state_for_tcp() const;
   bool robot_state_fresh() const;
 
@@ -34,7 +33,11 @@ class BridgeNode : public rclcpp::Node {
 
   std::string handle_command(const std::string& cmd_name, uint16_t seq,
                              const std::string& payload);
+  void urgent_estop(const std::string& cmd_name, uint16_t seq,
+                    const std::string& payload);
   std::string wait_cmd_result(uint16_t seq, const std::string& cmd_name);
+  void publish_cmd_envelope(const std::string& cmd_name, uint16_t seq,
+                            const std::string& payload);
   void log(const std::string& line);
   static uint64_t now_ms();
 
@@ -56,9 +59,11 @@ class BridgeNode : public rclcpp::Node {
   std::map<uint16_t, PendingCmd> pending_;
   std::mutex pending_cv_mu_;
   std::condition_variable pending_cv_;
+  std::atomic<bool> estop_raised_{false};
+  std::atomic<bool> async_estop_seq_valid_{false};
+  std::atomic<uint16_t> async_estop_seq_{0};
 
   std::unique_ptr<TcpServer> server_;
-  std::atomic<bool> cmd_forward_{true};
 };
 
 }  // namespace botcockpit

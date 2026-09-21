@@ -35,6 +35,8 @@ class RobotState : public QObject
     Q_PROPERTY(QString taskStatus READ taskStatus NOTIFY taskChanged)
     Q_PROPERTY(QString faultsSummary READ faultsSummary NOTIFY faultsChanged)
     Q_PROPERTY(int faultCount READ faultCount NOTIFY faultsChanged)
+    Q_PROPERTY(QString navStatus READ navStatus NOTIFY navStatusChanged)
+    Q_PROPERTY(int navPathLen READ navPathLen NOTIFY navStatusChanged)
     Q_PROPERTY(QString lastCmdAckText READ lastCmdAckText NOTIFY lastCmdAckChanged)
     Q_PROPERTY(bool lastCmdOk READ lastCmdOk NOTIFY lastCmdAckChanged)
     Q_PROPERTY(QVariantList faultsList READ faultsList NOTIFY faultsListChanged)
@@ -69,6 +71,8 @@ public:
     QString taskStatus() const { return task_status_; }
     QString faultsSummary() const { return faults_summary_; }
     int faultCount() const { return fault_count_; }
+    QString navStatus() const { return nav_status_; }
+    int navPathLen() const { return nav_path_len_; }
     QString lastCmdAckText() const { return last_cmd_ack_text_; }
     bool lastCmdOk() const { return last_cmd_ok_; }
     QVariantList faultsList() const { return faults_list_; }
@@ -113,6 +117,7 @@ signals:
     void faultsChanged();
     void lastCmdAckChanged();
     void faultsListChanged();
+    void navStatusChanged();
     void logLinesChanged();
     void autoReconnectChanged();
     void reconnectAttemptsChanged();
@@ -142,6 +147,8 @@ private:
     QString task_status_ = QStringLiteral("NONE");
     QString faults_summary_;
     int fault_count_ = 0;
+    QString nav_status_ = QStringLiteral("IDLE");
+    int nav_path_len_ = 0;
     QString last_cmd_ack_text_;
     bool last_cmd_ok_ = false;
     QVariantList faults_list_;

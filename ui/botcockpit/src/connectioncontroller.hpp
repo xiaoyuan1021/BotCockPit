@@ -59,4 +59,6 @@ private:
     int last_port_ = 8765;
     int backoff_s_ = 1;
     bool manual_disconnect_ = false;
+    bool reconnect_pending_ = false;
+    bool hello_ok_session_ = false;
 };

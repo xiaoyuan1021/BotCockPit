@@ -5,6 +5,8 @@
 #include <cstdlib>
 #include <sstream>
 
+#include "botcockpit_sim/nav.hpp"
+
 namespace botcockpit_sim {
 namespace {
 
@@ -242,9 +244,15 @@ CallbackReturn FakeRobot::on_configure(const rclcpp_lifecycle::State&)
   estop_ = false;
   console_online_ = false;
   battery_ = 100.0;
+  // Place start pose on free corridor cell (not on map border)
+  pose_x_ = 1.25;
+  pose_y_ = 0.0;
+  pose_yaw_ = 0.0;
   task_status_ = "NONE";
   task_id_.clear();
   task_type_.clear();
+  nav_path_.clear();
+  nav_status_ = "IDLE";
   clear_faults();
   nodes_[0].status = "OK";
   nodes_[1].status = "OK";
@@ -372,30 +380,44 @@ void FakeRobot::tick()
 
   recompute_phase_and_control();
 
-  // Motion simulation only when RUNNING and not estopped/faulted.
+  // Plan A: A* path + pure pursuit tracking (diff-drive kinematics)
   if (!estop_ && phase_ == "RUNNING" && task_type_ == "goto") {
-    const double speed = 0.5;
-    const double d = dist(pose_x_, pose_y_, goal_x_, goal_y_);
-    if (d < 0.05) {
-      pose_x_ = goal_x_;
-      pose_y_ = goal_y_;
-      task_status_ = "DONE";
-      phase_ = "IDLE";
-      recompute_phase_and_control();
-    } else {
-      const double step = speed * dt;
-      const double ratio = (d > 1e-6) ? std::min(1.0, step / d) : 1.0;
-      pose_x_ += (goal_x_ - pose_x_) * ratio;
-      pose_y_ += (goal_y_ - pose_y_) * ratio;
-      pose_yaw_ = std::atan2(goal_y_ - pose_y_, goal_x_ - pose_x_);
+    if (!nav_path_.empty()) {
+      double v = 0.0, w = 0.0;
+      nav::pure_pursuit(pose_x_, pose_y_, pose_yaw_, nav_path_, nav_idx_, 0.7,
+                        v, w);
+      pose_x_ += v * std::cos(pose_yaw_) * dt;
+      pose_y_ += v * std::sin(pose_yaw_) * dt;
+      pose_yaw_ += w * dt;
+      while (pose_yaw_ > M_PI) {
+        pose_yaw_ -= 2 * M_PI;
+      }
+      while (pose_yaw_ < -M_PI) {
+        pose_yaw_ += 2 * M_PI;
+      }
       task_status_ = "EXECUTING";
+      nav_status_ = "TRACKING";
+      const auto& goal_wp = nav_path_.back();
+      if (nav_idx_ + 1 >= nav_path_.size() &&
+          dist(pose_x_, pose_y_, goal_wp.first, goal_wp.second) < 0.35) {
+        pose_x_ = goal_wp.first;
+        pose_y_ = goal_wp.second;
+        task_status_ = "DONE";
+        phase_ = "IDLE";
+        nav_status_ = "IDLE";
+        recompute_phase_and_control();
+      }
+    } else {
+      // No path — fail task
+      task_status_ = "FAILED";
+      phase_ = "IDLE";
+      nav_status_ = "FAILED";
+      recompute_phase_and_control();
     }
     battery_ -= 0.05 * dt;
   } else if (!estop_ && phase_ == "IDLE") {
-    pose_x_ += 0.1 * dt;
-    if (pose_x_ > 10.0) {
-      pose_x_ = 0.0;
-    }
+    // gentle idle drift in place only (map demo: keep on free cells)
+    pose_yaw_ += 0.05 * dt;
     battery_ -= 0.02 * dt;
   }
 
@@ -480,6 +502,10 @@ std::string FakeRobot::build_state_json() const
   oss << "]";
   oss << ",\"estop\":" << (estop_ ? "true" : "false");
   oss << ",\"control_enabled\":" << (control_enabled_ ? "true" : "false");
+  // Plan A nav summary (path for future canvas; path_len for UI)
+  oss << ",\"nav\":{\"status\":\"" << esc(nav_status_) << "\",\"path_len\":"
+      << nav_path_.size() << ",\"path\":" << nav::path_to_json(nav_path_)
+      << ",\"goal\":{\"x\":" << goal_x_ << ",\"y\":" << goal_y_ << "}}";
   oss << "}";
   return oss.str();
 }
@@ -671,12 +697,29 @@ void FakeRobot::on_cmd(const std_msgs::msg::String::SharedPtr msg)
       extract_number(data, "x", x);
       extract_number(data, "y", y);
       if (task_id.empty()) {
-        task_id = "T-sim";
+        task_id = "T-nav";
       }
       if (!task_id_.empty() && task_id_ == task_id && task_status_ == "DONE") {
         publish_cmd_result(seq, cmd, true, "DONE", "", task_id);
         return;
       }
+      // Plan A: A* on demo corridor map (with inflation)
+      nav_map_ = nav::GridMap::make_corridor_demo();
+      nav_map_.inflate(1);
+      nav_status_ = "PLANNING";
+      nav_path_ = nav::astar(nav_map_, pose_x_, pose_y_, x, y);
+      if (nav_path_.empty()) {
+        nav_status_ = "FAILED";
+        faults_.push_back({"E_TASK_FAILED", "ERROR", "fake_robot",
+                           "A* no path to goal", true});
+        publish_cmd_result(seq, cmd, false, "REJECTED", "unknown_task", task_id);
+        recompute_phase_and_control();
+        publish_state();
+        return;
+      }
+      nav_idx_ = 0;
+      nav_status_ = "TRACKING";
+      nav_ready_ = true;
       task_id_ = task_id;
       task_type_ = "goto";
       task_status_ = "ACCEPTED";

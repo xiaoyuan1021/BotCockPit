@@ -29,9 +29,10 @@ uint64_t TcpServer::now_ms()
 }
 
 TcpServer::TcpServer(StateProvider state_provider, CommandHandler cmd_handler,
-                     LogFn log)
+                     UrgentHandler urgent_handler, LogFn log)
     : state_provider_(std::move(state_provider)),
       cmd_handler_(std::move(cmd_handler)),
+      urgent_handler_(std::move(urgent_handler)),
       log_(std::move(log))
 {
 }
@@ -43,6 +44,7 @@ TcpServer::~TcpServer()
 
 void TcpServer::set_state_provider(StateProvider fn)
 {
+  std::lock_guard<std::mutex> lock(clients_mu_);
   state_provider_ = std::move(fn);
 }
 
@@ -53,30 +55,20 @@ bool TcpServer::start(int port)
   }
   listen_fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
   if (listen_fd_ < 0) {
-    if (log_) {
-      log_("[tcp] socket() failed");
-    }
     return false;
   }
   int yes = 1;
   ::setsockopt(listen_fd_, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
-
   sockaddr_in addr{};
   addr.sin_family = AF_INET;
   addr.sin_addr.s_addr = htonl(INADDR_ANY);
   addr.sin_port = htons(static_cast<uint16_t>(port));
   if (::bind(listen_fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
-    if (log_) {
-      log_("[tcp] bind() failed on port " + std::to_string(port));
-    }
     ::close(listen_fd_);
     listen_fd_ = -1;
     return false;
   }
   if (::listen(listen_fd_, 8) < 0) {
-    if (log_) {
-      log_("[tcp] listen() failed");
-    }
     ::close(listen_fd_);
     listen_fd_ = -1;
     return false;
@@ -85,6 +77,7 @@ bool TcpServer::start(int port)
   running_.store(true);
   accept_thread_ = std::thread([this]() { accept_loop(); });
   watchdog_thread_ = std::thread([this]() { heartbeat_watchdog(); });
+  cmd_thread_ = std::thread([this]() { cmd_worker_loop(); });
   if (log_) {
     log_("[tcp] listening on 0.0.0.0:" + std::to_string(port));
   }
@@ -93,8 +86,8 @@ bool TcpServer::start(int port)
 
 void TcpServer::stop()
 {
-  // Idempotent shutdown: allow Ctrl+C → spin exit → stop_tcp() → dtor.
   const bool was_running = running_.exchange(false);
+  queue_cv_.notify_all();
   if (listen_fd_ >= 0) {
     ::shutdown(listen_fd_, SHUT_RDWR);
     ::close(listen_fd_);
@@ -117,6 +110,9 @@ void TcpServer::stop()
   }
   if (watchdog_thread_.joinable()) {
     watchdog_thread_.join();
+  }
+  if (cmd_thread_.joinable()) {
+    cmd_thread_.join();
   }
   {
     std::lock_guard<std::mutex> lock(clients_mu_);
@@ -154,12 +150,10 @@ void TcpServer::accept_loop()
     }
     int yes = 1;
     ::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof(yes));
-
     auto client = std::make_shared<Client>();
     client->fd.store(fd);
     client->last_rx_ms = now_ms();
     client->last_hb_rx_ms = client->last_rx_ms;
-    client->last_hb_tx_ms = client->last_rx_ms;
     {
       std::lock_guard<std::mutex> lock(clients_mu_);
       clients_.push_back(client);
@@ -167,8 +161,7 @@ void TcpServer::accept_loop()
     if (log_) {
       char ip[64] = {0};
       ::inet_ntop(AF_INET, &peer.sin_addr, ip, sizeof(ip));
-      log_("[tcp] client connected " + std::string(ip) + ":" +
-           std::to_string(ntohs(peer.sin_port)));
+      log_("[tcp] client connected " + std::string(ip));
     }
     std::thread([this, client]() { client_loop(client); }).detach();
   }
@@ -194,18 +187,16 @@ void TcpServer::client_loop(std::shared_ptr<Client> client)
     }
     client->last_rx_ms = now_ms();
     client->decoder.append(buf, static_cast<size_t>(n));
-    // Drain all complete frames; process ESTOP first (PROTOCOL §7.1 priority)
-    // within this batch so an urgent stop is not stuck behind other cmds.
     std::vector<Frame> batch;
     Frame frame;
     while (client->decoder.next(frame)) {
       batch.push_back(frame);
     }
+    // PROTOCOL §7.1: handle ESTOP first in this recv batch; non-urgent CMDs
+    // are queued so recv thread is never blocked on ACK wait.
     std::stable_sort(batch.begin(), batch.end(),
                      [](const Frame& a, const Frame& b) {
-                       const bool ae = (a.type == MSG_CMD_ESTOP) != 0;
-                       const bool be = (b.type == MSG_CMD_ESTOP) != 0;
-                       return ae > be;  // ESTOP first
+                       return (a.type == MSG_CMD_ESTOP) > (b.type == MSG_CMD_ESTOP);
                      });
     for (const Frame& f : batch) {
       handle_frame(client, f);
@@ -271,7 +262,6 @@ bool TcpServer::send_frame(const std::shared_ptr<Client>& client, uint8_t type,
 std::string TcpServer::inject_runtime_fields(const std::string& state_json,
                                              const std::string& conn_value)
 {
-  // Prefer robot/bridge-computed state as-is when it already has conn.
   if (!state_json.empty() && state_json.find("\"conn\"") != std::string::npos) {
     return state_json;
   }
@@ -287,17 +277,87 @@ std::string TcpServer::inject_runtime_fields(const std::string& state_json,
   return body;
 }
 
+void TcpServer::enqueue_cmd(const std::shared_ptr<Client>& client,
+                            const Frame& frame, const std::string& cmd_name)
+{
+  CmdJob job;
+  job.client = client;
+  job.seq = frame.seq;
+  job.cmd_name = cmd_name;
+  job.payload = frame.payload;
+  job.urgent = (frame.type == MSG_CMD_ESTOP);
+  if (!job.urgent) {
+    std::lock_guard<std::mutex> lock(queue_mu_);
+    cmd_queue_.push_back(job);
+    queue_cv_.notify_one();
+    return;
+  }
+  // Urgent: call non-blocking handler on recv thread immediately (§7.1).
+  if (urgent_handler_) {
+    urgent_handler_(cmd_name, job.seq, job.payload);
+    if (log_) {
+      log_("[tcp] URGENT " + cmd_name + " seq=" + std::to_string(job.seq));
+    }
+  } else if (cmd_handler_) {
+    const std::string ack = cmd_handler_(cmd_name, job.seq, job.payload);
+    send_frame(client, MSG_CMD_ACK, 0, job.seq, ack);
+  }
+}
+
+void TcpServer::cmd_worker_loop()
+{
+  while (true) {
+    CmdJob job;
+    {
+      std::unique_lock<std::mutex> lock(queue_mu_);
+      queue_cv_.wait(lock, [this]() {
+        return !running_.load() || !cmd_queue_.empty();
+      });
+      if (!running_.load() && cmd_queue_.empty()) {
+        return;
+      }
+      if (cmd_queue_.empty()) {
+        continue;
+      }
+      job = cmd_queue_.front();
+      cmd_queue_.pop_front();
+    }
+    if (!job.client || job.client->fd.load() < 0) {
+      continue;
+    }
+    std::string ack_payload;
+    if (!job.client->hello_ok) {
+      ack_payload = "{\"seq\":" + std::to_string(job.seq) +
+                    ",\"ok\":false,\"cmd\":\"" + job.cmd_name +
+                    "\",\"status\":\"REJECTED\",\"reason\":\"proto_error\"}";
+    } else if (!cmd_handler_) {
+      ack_payload = "{\"seq\":" + std::to_string(job.seq) +
+                    ",\"ok\":false,\"cmd\":\"" + job.cmd_name +
+                    "\",\"status\":\"REJECTED\",\"reason\":\"not_implemented\"}";
+    } else {
+      ack_payload = cmd_handler_(job.cmd_name, job.seq, job.payload);
+    }
+    send_frame(job.client, MSG_CMD_ACK, 0, job.seq, ack_payload);
+  }
+}
+
+void TcpServer::complete_async_ack(uint16_t seq, const std::string& ack_json)
+{
+  std::vector<std::shared_ptr<Client>> snapshot;
+  {
+    std::lock_guard<std::mutex> lock(clients_mu_);
+    snapshot = clients_;
+  }
+  for (auto& c : snapshot) {
+    if (c && c->hello_ok && c->fd.load() >= 0) {
+      send_frame(c, MSG_CMD_ACK, 0, seq, ack_json);
+    }
+  }
+}
+
 void TcpServer::handle_frame(const std::shared_ptr<Client>& client,
                              const Frame& frame)
 {
-  if (log_) {
-    std::ostringstream oss;
-    oss << "[tcp] rx type=0x" << std::hex << static_cast<int>(frame.type)
-        << std::dec << " (" << msg_type_name(frame.type) << ") seq="
-        << frame.seq << " len=" << frame.payload.size();
-    log_(oss.str());
-  }
-
   switch (frame.type) {
     case MSG_HELLO: {
       std::string proto_min;
@@ -313,10 +373,6 @@ void TcpServer::handle_frame(const std::shared_ptr<Client>& client,
         send_frame(client, MSG_HELLO_ACK, 0, frame.seq, ack);
         client->hello_ok = true;
         const std::string raw_state = state_provider_ ? state_provider_() : "{}";
-        if (raw_state.find("\"battery\"") == std::string::npos) {
-          log_("[tcp] robot state offline/empty — start fake_robot and "
-               "lifecycle configure+activate");
-        }
         send_frame(client, MSG_STATE_SNAPSHOT, 0, 0,
                    inject_runtime_fields(raw_state, "OFFLINE"));
       } else {
@@ -339,26 +395,7 @@ void TcpServer::handle_frame(const std::shared_ptr<Client>& client,
     case MSG_CMD_RESET:
     case MSG_PARAM_GET:
     case MSG_PARAM_SET: {
-      if (frame.type == MSG_CMD_ESTOP &&
-          (frame.flags & FLAG_URGENT) == 0 && log_) {
-        log_("[tcp] CMD_ESTOP missing URGENT flag (PROTOCOL §5.7)");
-      }
-      std::string cmd_name = msg_type_name(frame.type);
-      std::string ack_payload;
-      if (!client->hello_ok) {
-        ack_payload =
-            "{\"seq\":" + std::to_string(frame.seq) +
-            ",\"ok\":false,\"cmd\":\"" + cmd_name +
-            "\",\"status\":\"REJECTED\",\"reason\":\"proto_error\"}";
-      } else if (!cmd_handler_) {
-        ack_payload =
-            "{\"seq\":" + std::to_string(frame.seq) +
-            ",\"ok\":false,\"cmd\":\"" + cmd_name +
-            "\",\"status\":\"REJECTED\",\"reason\":\"not_implemented\"}";
-      } else {
-        ack_payload = cmd_handler_(cmd_name, frame.seq, frame.payload);
-      }
-      send_frame(client, MSG_CMD_ACK, 0, frame.seq, ack_payload);
+      enqueue_cmd(client, frame, msg_type_name(frame.type));
       break;
     }
     default:
@@ -368,10 +405,17 @@ void TcpServer::handle_frame(const std::shared_ptr<Client>& client,
 
 void TcpServer::broadcast_state_delta()
 {
-  if (!running_.load() || !state_provider_) {
+  if (!running_.load()) {
     return;
   }
-  const std::string body = inject_runtime_fields(state_provider_(), "OFFLINE");
+  std::string raw = "{}";
+  {
+    std::lock_guard<std::mutex> lock(clients_mu_);
+    if (state_provider_) {
+      raw = state_provider_();
+    }
+  }
+  const std::string body = inject_runtime_fields(raw, "OFFLINE");
   std::vector<std::shared_ptr<Client>> snapshot;
   {
     std::lock_guard<std::mutex> lock(clients_mu_);
@@ -379,7 +423,6 @@ void TcpServer::broadcast_state_delta()
   }
   for (auto& c : snapshot) {
     if (c && c->hello_ok && c->fd.load() >= 0) {
-      // Week-1 allows full snapshot body on DELTA.
       send_frame(c, MSG_STATE_DELTA, 0, 0, body);
     }
   }
@@ -396,7 +439,6 @@ void TcpServer::heartbeat_watchdog()
       std::lock_guard<std::mutex> lock(clients_mu_);
       snapshot = clients_;
     }
-    // PROTOCOL §3: bridge also sends HEARTBEAT every 1000 ms (bidirectional).
     if (now - last_tx >= static_cast<uint64_t>(HB_INTERVAL_MS)) {
       last_tx = now;
       const std::string hb = std::string("{\"ts_ms\":") + std::to_string(now) +
@@ -415,15 +457,10 @@ void TcpServer::heartbeat_watchdog()
       if (fd < 0) {
         continue;
       }
-      // Drop idle non-HELLO sockets and heartbeat-timeout clients.
       const uint64_t ref = c->hello_ok ? c->last_hb_rx_ms : c->last_rx_ms;
       const uint64_t limit = c->hello_ok ? static_cast<uint64_t>(HB_TIMEOUT_MS)
                                           : static_cast<uint64_t>(HB_TIMEOUT_MS * 2);
       if (ref > 0 && now - ref > limit) {
-        if (log_) {
-          log_(c->hello_ok ? "[tcp] heartbeat timeout, dropping client"
-                           : "[tcp] HELLO timeout, dropping client");
-        }
         ::shutdown(fd, SHUT_RDWR);
       }
     }
