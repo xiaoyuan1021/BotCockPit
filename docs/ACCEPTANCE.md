@@ -46,9 +46,9 @@
 | B4 | 断线安全 | PASS | console offline → `control_enabled=false`，RUNNING SAFE 停；恢复后可再控 | test_link_loss_safety |
 | B5 | launch_testing | PASS | 3/3 Passed（normal / estop / link_loss） | `ctest` in build/botcockpit_sim |
 | B6 | 故障注入 | PASS | `tools/inject_fault.py` → `phase=FAULT`；`--clear` 可清 | smoke 日志 |
-| B7 | QML Control | 待现场 | Control 页/二次确认/禁用逻辑已实现；需桌面点击验收 | 下次连接 UI 时勾选 |
+| B7 | QML Control | PASS（主路径） | 截图：PHASE RUNNING · TASK goto EXECUTING · ACK `CMD_TASK OK ACCEPTED seq=10` · ctl OFF；ESTOP 按钮可用 | ESTOP/Reset 对话框建议再各点一次作完整记录 |
 
-**本周结论**：PLAN 第 2 周自动化验收（B1–B6）通过；B7 需用户在 QML Control 页实操确认后勾 PASS。
+**本周结论**：PLAN 第 2 周验收 **B1–B7 通过**（自动化 + Control UI 主路径）。可进入第 3 周。
 
 **复现 launch_testing：**
 ```bash
