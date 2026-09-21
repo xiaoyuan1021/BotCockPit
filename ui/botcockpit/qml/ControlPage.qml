@@ -257,7 +257,7 @@ Pane {
                     color: "#fff"
                     font: estopBtn.font
                     horizontalAlignment: Text.AlignHCenter
-                    verticalCenterAlignment: Text.AlignVCenter
+                    verticalAlignment: Text.AlignVCenter
                 }
                 background: Rectangle {
                     radius: 10
