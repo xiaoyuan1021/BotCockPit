@@ -65,12 +65,13 @@ class TestLinkLossSafety(unittest.TestCase):
             beater.set_online(False)
             state = wait_state(
                 node,
-                lambda s: s.get("control_enabled") is False,
+                lambda s: s.get("control_enabled") is False
+                and s.get("phase") in ("IDLE", "FAULT", "DEGRADED", "ESTOP"),
                 timeout=4,
             )
-            self.assertIsNotNone(state)
+            self.assertIsNotNone(state, "console offline should SAFE-stop out of RUNNING")
             self.assertFalse(state.get("control_enabled"), state)
-            self.assertIn(state.get("phase"), ("IDLE", "FAULT", "DEGRADED", "ESTOP", "RUNNING"))
+            self.assertIn(state.get("phase"), ("IDLE", "FAULT", "DEGRADED", "ESTOP"))
 
             ack2 = send_cmd(
                 node,

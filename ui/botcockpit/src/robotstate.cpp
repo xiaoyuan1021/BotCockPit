@@ -184,10 +184,26 @@ void RobotState::applyState(const QVariantMap& map)
         }
     }
 
-    // 机器人侧完整状态（fake_robot 经 bridge 转发）才带 battery/pose/nodes
-    const bool robot_state = map.contains(QStringLiteral("battery")) ||
-                             map.contains(QStringLiteral("nodes")) ||
-                             map.contains(QStringLiteral("pose"));
+    // 机器人侧真实状态：优先看 conn/控制使能，避免 bridge 离线模板误判
+    // （离线模板也含 battery/nodes/pose，但 conn 通常为 OFFLINE 且 control_enabled=false）
+    bool robot_state = map.contains(QStringLiteral("battery")) ||
+                       map.contains(QStringLiteral("nodes")) ||
+                       map.contains(QStringLiteral("pose"));
+    if (map.contains(QStringLiteral("conn"))) {
+        const QString c = map.value(QStringLiteral("conn")).toString();
+        if (c == QLatin1String("OFFLINE") &&
+            !map.value(QStringLiteral("control_enabled")).toBool()) {
+            // 仅当后续出现 ONLINE/ESTOP/DEGRADED 等再算作有效机器人状态
+            robot_state = false;
+        }
+    }
+    if (map.contains(QStringLiteral("phase"))) {
+        const QString p = map.value(QStringLiteral("phase")).toString();
+        if (p == QLatin1String("BOOT") && robot_state &&
+            !map.value(QStringLiteral("control_enabled")).toBool()) {
+            robot_state = false;
+        }
+    }
     if (robot_state != has_robot_state_) {
         has_robot_state_ = robot_state;
         emit hasRobotStateChanged();

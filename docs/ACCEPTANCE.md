@@ -48,7 +48,22 @@
 | B6 | 故障注入 | PASS | `tools/inject_fault.py` → `phase=FAULT`；`--clear` 可清 | smoke 日志 |
 | B7 | QML Control | PASS（主路径） | 截图：PHASE RUNNING · TASK goto EXECUTING · ACK `CMD_TASK OK ACCEPTED seq=10` · ctl OFF；ESTOP 按钮可用 | ESTOP/Reset 对话框建议再各点一次作完整记录 |
 
-**本周结论**：PLAN 第 2 周验收 **B1–B7 通过**（自动化 + Control UI 主路径）。可进入第 3 周。
+**本周结论**：PLAN 第 2 周验收 **B1–B7 通过**（自动化 + Control UI 主路径）。**2026-09-20 代码 review：Ready to close**（无 Critical）。
+
+### Week 2 Code Review（收官）
+
+| 类型 | 结论 |
+|------|------|
+| Critical | **无** — 主路径/安全策略/架构约束成立 |
+| 已确认 OK | 状态机 §4、ESTOP/RESET、console SAFE 停、ACK、QML 只绑 Model 不写协议 |
+| 收官时已修 | `hasRobotState` 误判；`wait_state` 假通过；link_loss 断言 SAFE 停出 RUNNING |
+| 记入 Week 3 | bridge 同连接 ESTOP 优先级（§7.1）；TCP 全链路 launch 测试；B7 ESTOP/RESET 对话框补点；RESET 残余 ERROR 的 reason；DELTA 真增量 |
+
+**未关闭缺陷（Week 3  backlog）**：
+1. TCP 同连接上 ESTOP 可能排在进行中 CMD 之后（需指令队列/紧急通道）
+2. launch_testing 未覆盖 bridge TCP 转发
+3. UI 上 ESTOP/Reset 确认框完整点击（B7 细节）
+4. STATE_DELTA 仍为全量快照
 
 **复现 launch_testing：**
 ```bash
