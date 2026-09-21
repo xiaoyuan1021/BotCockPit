@@ -61,7 +61,8 @@ def lifecycle_configure_activate(node, node_name: str = "fake_robot", timeout: f
     return _call(Transition.TRANSITION_CONFIGURE) and _call(Transition.TRANSITION_ACTIVATE)
 
 
-def wait_state(node, predicate, timeout: float = 5.0) -> Optional[Dict[str, Any]]:
+def wait_state(node, predicate, timeout: float = 5.0, require_match: bool = True):
+    """Spin until /botcockpit/state matches predicate. None if require_match and never held."""
     from std_msgs.msg import String
     import rclpy
 
@@ -76,12 +77,16 @@ def wait_state(node, predicate, timeout: float = 5.0) -> Optional[Dict[str, Any]
     sub = node.create_subscription(String, "/botcockpit/state", _cb, 10)
     end = time.time() + timeout
     last = None
+    matched = False
     while time.time() < end:
         rclpy.spin_once(node, timeout_sec=0.05)
         last = box.get("state")
         if last is not None and predicate(last):
+            matched = True
             break
     node.destroy_subscription(sub)
+    if require_match and not matched:
+        return None
     return last
 
 
