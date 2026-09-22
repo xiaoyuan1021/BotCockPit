@@ -252,6 +252,7 @@ CallbackReturn FakeRobot::on_configure(const rclcpp_lifecycle::State&)
   task_id_.clear();
   task_type_.clear();
   nav_path_.clear();
+  trail_.clear();
   nav_status_ = "IDLE";
   clear_faults();
   nodes_[0].status = "OK";
@@ -385,15 +386,28 @@ void FakeRobot::tick()
     if (!nav_path_.empty()) {
       const auto pose_before = std::make_pair(pose_x_, pose_y_);
       double v = 0.0, w = 0.0;
-      nav::pure_pursuit(pose_x_, pose_y_, pose_yaw_, nav_path_, nav_idx_, 0.55,
-                        v, w);
+      nav::pure_pursuit(nav_map_, pose_x_, pose_y_, pose_yaw_, nav_path_,
+                        nav_idx_, 0.45, v, w);
       double nx = pose_x_ + v * std::cos(pose_yaw_) * dt;
       double ny = pose_y_ + v * std::sin(pose_yaw_) * dt;
+      bool collided = false;
+      // Final approach: allow creeping into the commanded goal sample even if
+      // it sits in an inflated cell (common when goal is near a wall).
+      const double d_goal_now = dist(pose_x_, pose_y_, goal_x_, goal_y_);
+      const double d_goal_next = dist(nx, ny, goal_x_, goal_y_);
+      const bool final_creep = d_goal_now < 0.55 && d_goal_next < d_goal_now;
       // Collision guard: never step into inflated obstacle
-      if (!nav::is_free(nav_map_, nx, ny)) {
-        // Rotate toward path instead of plowing the wall (anti-circle/stuck)
+      if (!final_creep && !nav::is_free(nav_map_, nx, ny)) {
+        collided = true;
+        // Rotate toward the LOS-visible path aim point (not a fixed side)
         v = 0.0;
-        w = (w >= 0.0 ? 1.0 : -1.0) * 0.8;
+        const auto aim = nav::aim_point(nav_map_, nav_path_, nav_idx_, pose_x_,
+                                        pose_y_, 0.45);
+        const double err = nav::heading_err(pose_yaw_, pose_x_, pose_y_,
+                                            aim.first, aim.second);
+        w = (std::abs(err) < 0.15 ? (w >= 0.0 ? 1.0 : -1.0)
+                                  : (err >= 0.0 ? 1.0 : -1.0)) *
+            0.8;
         nx = pose_x_;
         ny = pose_y_;
       }
@@ -406,23 +420,42 @@ void FakeRobot::tick()
       while (pose_yaw_ < -M_PI) {
         pose_yaw_ += 2 * M_PI;
       }
+      // Breadcrumb trail (already-driven route) for console canvas
+      if (trail_.empty() ||
+          dist(trail_.back().first, trail_.back().second, pose_x_, pose_y_) >
+              0.05) {
+        trail_.emplace_back(pose_x_, pose_y_);
+        if (trail_.size() > 800) {
+          trail_.erase(trail_.begin(), trail_.begin() + 200);
+        }
+      }
       task_status_ = "EXECUTING";
       nav_status_ = "TRACKING";
 
-      // Stuck detection → replan from current pose
+      // Stuck = no translation while blocked (or fully frozen).
+      // Free in-place alignment (large heading error) is not stuck.
       const double moved =
           dist(pose_before.first, pose_before.second, pose_x_, pose_y_);
-      stuck_s_ = (moved < 0.002 * std::max(1.0, dt / 0.2))
-                     ? (stuck_s_ + dt)
-                     : 0.0;
+      const bool translating = moved > 0.002 * std::max(1.0, dt / 0.2);
+      const bool aligning = !collided && std::abs(w) > 0.05 && !translating;
+      if (translating || aligning) {
+        stuck_s_ = 0.0;
+      } else {
+        stuck_s_ += dt;
+      }
       if (stuck_s_ > 1.2) {
         stuck_s_ = 0.0;
+        ++stuck_count_;
         nav_map_ = nav::GridMap::make_corridor_demo();
-        nav_map_.inflate(1);
-        auto replanned = nav::astar(nav_map_, pose_x_, pose_y_, goal_x_, goal_y_);
+        // First replans keep body inflation; after repeats, plan on a thinner
+        // body so narrow gaps stay reachable (collision guard still applies).
+        nav_map_.inflate(stuck_count_ >= 3 ? 0 : 1);
+        auto replanned =
+            nav::astar(nav_map_, pose_x_, pose_y_, goal_x_, goal_y_);
         if (!replanned.empty()) {
           nav_path_ = std::move(replanned);
           nav_idx_ = 0;
+          nav::advance_idx(nav_path_, nav_idx_, pose_x_, pose_y_);
           nav_status_ = "TRACKING";
         }
       }
@@ -459,16 +492,23 @@ void FakeRobot::tick()
         }
       }
 
-      const auto& goal_wp = nav_path_.back();
-      if (nav_idx_ + 1 >= nav_path_.size() &&
-          dist(pose_x_, pose_y_, goal_wp.first, goal_wp.second) < 0.35) {
-        // Snap to exact commanded goal (end-point alignment)
+      // Completion: snap exactly to commanded goal (end-point alignment)
+      const double d_goal =
+          dist(pose_x_, pose_y_, goal_x_, goal_y_);
+      if (d_goal < 0.22) {
         pose_x_ = goal_x_;
         pose_y_ = goal_y_;
+        if (trail_.empty() ||
+            dist(trail_.back().first, trail_.back().second, pose_x_,
+                 pose_y_) > 0.02) {
+          trail_.emplace_back(pose_x_, pose_y_);
+        }
+        track_err_ = 0.0;
         task_status_ = "DONE";
         phase_ = "IDLE";
         nav_status_ = "IDLE";
         stuck_s_ = 0.0;
+        stuck_count_ = 0;
         recompute_phase_and_control();
       }
     } else {
@@ -564,9 +604,13 @@ std::string FakeRobot::build_state_json() const
   oss << "]";
   oss << ",\"estop\":" << (estop_ ? "true" : "false");
   oss << ",\"control_enabled\":" << (control_enabled_ ? "true" : "false");
-  // Plan A nav summary (path for future canvas; path_len for UI)
+  // Plan A nav summary (path + trail + cursor for console canvas)
   oss << ",\"nav\":{\"status\":\"" << esc(nav_status_) << "\",\"path_len\":"
-      << nav_path_.size() << ",\"path\":" << nav::path_to_json(nav_path_)
+      << nav_path_.size() << ",\"idx\":" << nav_idx_
+      << ",\"path\":" << nav::path_to_json(nav_path_)
+      << ",\"path_flat\":" << nav::path_to_flat_json(nav_path_)
+      << ",\"trail\":" << nav::path_to_json(trail_)
+      << ",\"trail_flat\":" << nav::path_to_flat_json(trail_)
       << ",\"goal\":{\"x\":" << goal_x_ << ",\"y\":" << goal_y_ << "}"
       << ",\"track_err\":" << track_err_ << ",\"track_err_max\":" << track_err_max_
       << "}";
@@ -684,10 +728,13 @@ void FakeRobot::on_cmd(const std_msgs::msg::String::SharedPtr msg)
       publish_cmd_result(seq, cmd, false, "REJECTED", "confirm_required");
       return;
     }
+    // Operator RESET must recover from ESTOP / task failures / battery warn.
+    // Only keep safety-critical ERROR sources (e.g. E_NODE_TIMEOUT) as blocking.
     bool has_blocking = false;
     for (const auto& f : faults_) {
-      if (f.code == "E_ESTOP_ACTIVE" || f.code == "W_BATTERY_LOW") {
-        continue;  // symptom / warn, not blocking source
+      if (f.code == "E_ESTOP_ACTIVE" || f.code == "W_BATTERY_LOW" ||
+          f.code == "E_TASK_FAILED") {
+        continue;  // symptom / task / warn — clearable by RESET
       }
       if (f.level == "ERROR") {
         has_blocking = true;
@@ -765,6 +812,8 @@ void FakeRobot::on_cmd(const std_msgs::msg::String::SharedPtr msg)
       task_type_.clear();
       nav_path_.clear();
       nav_status_ = "IDLE";
+      stuck_s_ = 0.0;
+      stuck_count_ = 0;
       if (phase_ == "RUNNING") {
         phase_ = "IDLE";
       }
@@ -789,6 +838,12 @@ void FakeRobot::on_cmd(const std_msgs::msg::String::SharedPtr msg)
       double y = pose_y_;
       extract_number(data, "x", x);
       extract_number(data, "y", y);
+      // Map world domain: x∈[0,20], y∈[-5,5] (nav.hpp origin+size)
+      if (x < 0.0 || x > 20.0 || y < -5.0 || y > 5.0) {
+        publish_cmd_result(seq, cmd, false, "REJECTED", "invalid_payload",
+                           task_id);
+        return;
+      }
       if (task_id.empty()) {
         ++task_seq_;
         task_id = "T-" + std::to_string(task_seq_);
@@ -813,6 +868,10 @@ void FakeRobot::on_cmd(const std_msgs::msg::String::SharedPtr msg)
       nav_idx_ = 0;
       nav_status_ = "TRACKING";
       nav_ready_ = true;
+      stuck_s_ = 0.0;
+      stuck_count_ = 0;
+      trail_.clear();
+      trail_.emplace_back(pose_x_, pose_y_);
       task_id_ = task_id;
       task_type_ = "goto";
       task_status_ = "ACCEPTED";

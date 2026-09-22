@@ -96,12 +96,14 @@ class FakeRobot : public rclcpp_lifecycle::LifecycleNode {
   // Plan A navigation
   nav::GridMap nav_map_{};
   std::vector<std::pair<double, double>> nav_path_;
+  std::vector<std::pair<double, double>> trail_;
   size_t nav_idx_ = 0;
   std::string nav_status_ = "IDLE";  // IDLE/PLANNING/TRACKING/FAILED
   bool nav_ready_ = false;
   double track_err_ = 0.0;
   double track_err_max_ = 0.0;
   double stuck_s_ = 0.0;
+  int stuck_count_ = 0;
   int task_seq_ = 0;
 
   std::chrono::steady_clock::time_point idle_tp_{};

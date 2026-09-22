@@ -37,7 +37,12 @@ class RobotState : public QObject
     Q_PROPERTY(int faultCount READ faultCount NOTIFY faultsChanged)
     Q_PROPERTY(QString navStatus READ navStatus NOTIFY navStatusChanged)
     Q_PROPERTY(int navPathLen READ navPathLen NOTIFY navStatusChanged)
+    Q_PROPERTY(int navIdx READ navIdx NOTIFY navStatusChanged)
     Q_PROPERTY(QVariantList navPath READ navPath NOTIFY navStatusChanged)
+    Q_PROPERTY(QVariantList navTrail READ navTrail NOTIFY navTrailChanged)
+    // Flat [x0,y0,x1,y1,...] — reliable across QVariant→QML
+    Q_PROPERTY(QVariantList navPathFlat READ navPathFlat NOTIFY navStatusChanged)
+    Q_PROPERTY(QVariantList navTrailFlat READ navTrailFlat NOTIFY navTrailChanged)
     Q_PROPERTY(double navGoalX READ navGoalX NOTIFY navStatusChanged)
     Q_PROPERTY(double navGoalY READ navGoalY NOTIFY navStatusChanged)
     Q_PROPERTY(double trackErr READ trackErr NOTIFY trackErrChanged)
@@ -77,7 +82,11 @@ public:
     int faultCount() const { return fault_count_; }
     QString navStatus() const { return nav_status_; }
     int navPathLen() const { return nav_path_len_; }
+    int navIdx() const { return nav_idx_; }
     QVariantList navPath() const { return nav_path_; }
+    QVariantList navTrail() const { return nav_trail_; }
+    QVariantList navPathFlat() const { return nav_path_flat_; }
+    QVariantList navTrailFlat() const { return nav_trail_flat_; }
     double navGoalX() const { return nav_goal_x_; }
     double navGoalY() const { return nav_goal_y_; }
     double trackErr() const { return track_err_; }
@@ -126,6 +135,7 @@ signals:
     void lastCmdAckChanged();
     void faultsListChanged();
     void navStatusChanged();
+    void navTrailChanged();
     void trackErrChanged();
     void logLinesChanged();
     void autoReconnectChanged();
@@ -158,7 +168,11 @@ private:
     int fault_count_ = 0;
     QString nav_status_ = QStringLiteral("IDLE");
     int nav_path_len_ = 0;
+    int nav_idx_ = 0;
     QVariantList nav_path_;
+    QVariantList nav_trail_;
+    QVariantList nav_path_flat_;
+    QVariantList nav_trail_flat_;
     double nav_goal_x_ = 0.0;
     double nav_goal_y_ = 0.0;
     double track_err_ = 0.0;

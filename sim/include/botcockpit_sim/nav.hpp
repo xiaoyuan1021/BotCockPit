@@ -47,9 +47,10 @@ struct GridMap {
       m.set(0, y, 1);
       m.set(m.width - 1, y, 1);
     }
-    // Vertical wall with gap (forces A* detour)
+    // Vertical wall with wide gap (forces A* detour).
+    // 5 free cells so inflate(1) still leaves a 3-cell corridor (~1.5 m).
     for (int y = 2; y < m.height - 2; ++y) {
-      if (y == 8 || y == 9 || y == 10) {
+      if (y >= 7 && y <= 11) {
         continue;  // gap
       }
       m.set(20, y, 1);
@@ -165,7 +166,10 @@ inline std::vector<std::pair<double, double>> astar(const GridMap& map,
                             std::numeric_limits<float>::infinity());
   auto idx = [W](int x, int y) { return y * W + x; };
   auto h = [&](int x, int y) {
-    return static_cast<float>(std::abs(x - gcx) + std::abs(y - gcy));
+    const int dx = std::abs(x - gcx);
+    const int dy = std::abs(y - gcy);
+    // Octile distance — admissible for 8-connected (1 / sqrt2) steps
+    return static_cast<float>(std::max(dx, dy) + 0.4142f * std::min(dx, dy));
   };
   using QItem = std::pair<float, int>;  // f, index
   std::priority_queue<QItem, std::vector<QItem>, std::greater<QItem>> open;
@@ -191,7 +195,8 @@ inline std::vector<std::pair<double, double>> astar(const GridMap& map,
       }
       std::reverse(path.begin(), path.end());
       if (!path.empty()) {
-        // Exact commanded goal (not just grid cell center)
+        // Exact commanded goal for end-point alignment (even if that sample
+        // sits in an inflated cell — body inflation is for transit only).
         path.back() = {gx, gy};
       }
       return path;
@@ -205,6 +210,11 @@ inline std::vector<std::pair<double, double>> astar(const GridMap& map,
         continue;
       }
       if (map.at(nx, ny)) {
+        continue;
+      }
+      // No diagonal corner-cutting through inflated/occupied cells
+      if (d[0] != 0 && d[1] != 0 &&
+          (map.at(cx + d[0], cy) || map.at(cx, cy + d[1]))) {
         continue;
       }
       const int ni = idx(nx, ny);
@@ -231,8 +241,103 @@ inline bool is_free(const GridMap& map, double wx, double wy)
   return map.at(cx, cy) == 0;
 }
 
-// Pure pursuit step for diff-drive with simple collision guard (week3 harden).
-inline void pure_pursuit(double x, double y, double yaw,
+// Bresenham-ish LOS: true if the straight segment stays in free cells.
+inline bool segment_free(const GridMap& map, double x0, double y0, double x1,
+                         double y1)
+{
+  const double d = std::hypot(x1 - x0, y1 - y0);
+  const int n = std::max(1, static_cast<int>(std::ceil(d / 0.08)));
+  for (int i = 0; i <= n; ++i) {
+    const double t = static_cast<double>(i) / static_cast<double>(n);
+    if (!is_free(map, x0 + (x1 - x0) * t, y0 + (y1 - y0) * t)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Heading error to a world point (normalized to (-pi, pi]).
+inline double heading_err(double yaw, double x, double y, double tx, double ty)
+{
+  double err = std::atan2(ty - y, tx - x) - yaw;
+  while (err > M_PI) {
+    err -= 2.0 * M_PI;
+  }
+  while (err < -M_PI) {
+    err += 2.0 * M_PI;
+  }
+  return err;
+}
+
+// Advance path index when past current wp or next wp is closer.
+inline void advance_idx(const std::vector<std::pair<double, double>>& path,
+                        size_t& idx, double x, double y)
+{
+  while (idx < path.size()) {
+    const double d0 = std::hypot(path[idx].first - x, path[idx].second - y);
+    if (idx + 1 < path.size()) {
+      const double d1 =
+          std::hypot(path[idx + 1].first - x, path[idx + 1].second - y);
+      if (d0 < 0.35 || d1 + 0.05 < d0) {
+        ++idx;
+        continue;
+      }
+    } else if (d0 < 0.20) {
+      // hold on last point; completion is decided by the caller
+      break;
+    }
+    break;
+  }
+}
+
+// First path point (from idx) within path-length `lookahead` that is LOS-free.
+// Falls back to the next raw waypoint so we never aim through a wall corner.
+inline std::pair<double, double> aim_point(const GridMap& map,
+                                           const std::vector<std::pair<double, double>>& path,
+                                           size_t idx, double x, double y,
+                                           double lookahead)
+{
+  if (path.empty()) {
+    return {x, y};
+  }
+  if (idx >= path.size()) {
+    return path.back();
+  }
+  // Final approach: commanded goal is always aimable even if it sits in an
+  // inflated sample (LOS would otherwise lock onto the free cell before it).
+  if (std::hypot(path.back().first - x, path.back().second - y) < 0.60) {
+    return path.back();
+  }
+  // Farthest LOS-visible point within path length budget
+  double budget = lookahead;
+  std::pair<double, double> best = path[idx];
+  bool have = false;
+  for (size_t i = idx; i < path.size(); ++i) {
+    if (i > idx) {
+      const double seg = std::hypot(path[i].first - path[i - 1].first,
+                                    path[i].second - path[i - 1].second);
+      budget -= seg;
+      if (budget < 0.0) {
+        break;
+      }
+    }
+    if (!segment_free(map, x, y, path[i].first, path[i].second)) {
+      break;
+    }
+    best = path[i];
+    have = true;
+    if (std::hypot(path[i].first - x, path[i].second - y) >= lookahead) {
+      break;
+    }
+  }
+  if (have) {
+    return best;
+  }
+  return path[idx];
+}
+
+// Pure pursuit step for diff-drive (gap-aware, uses map for LOS aim).
+inline void pure_pursuit(const GridMap& map, double x, double y, double yaw,
                          const std::vector<std::pair<double, double>>& path,
                          size_t& idx, double lookahead, double& v, double& w)
 {
@@ -241,26 +346,22 @@ inline void pure_pursuit(double x, double y, double yaw,
   if (path.empty() || idx >= path.size()) {
     return;
   }
-  while (idx + 1 < path.size()) {
-    const double dx = path[idx].first - x;
-    const double dy = path[idx].second - y;
-    if (std::hypot(dx, dy) < 0.3) {
-      ++idx;
-    } else {
-      break;
+  advance_idx(path, idx, x, y);
+  if (idx >= path.size()) {
+    return;
+  }
+  // Tight local segments (gap / staircase) → shorter lookahead, never longer
+  double ld = lookahead;
+  if (idx + 1 < path.size()) {
+    const double seg = std::hypot(path[idx + 1].first - path[idx].first,
+                                  path[idx + 1].second - path[idx].second);
+    if (seg > 1e-3 && seg < 0.55) {
+      ld = std::min(lookahead, std::max(0.28, seg * 1.2));
     }
   }
-  size_t target = idx;
-  for (size_t i = idx; i < path.size(); ++i) {
-    const double dx = path[i].first - x;
-    const double dy = path[i].second - y;
-    target = i;
-    if (std::hypot(dx, dy) >= lookahead) {
-      break;
-    }
-  }
-  const double tx = path[target].first;
-  const double ty = path[target].second;
+  const auto aim = aim_point(map, path, idx, x, y, ld);
+  const double tx = aim.first;
+  const double ty = aim.second;
   const double dx = tx - x;
   const double dy = ty - y;
   const double local_x = std::cos(yaw) * dx + std::sin(yaw) * dy;
@@ -280,20 +381,14 @@ inline void pure_pursuit(double x, double y, double yaw,
     w = (alpha >= 0.0 ? 1.0 : -1.0) * 0.6;
     return;
   }
-  // Probe a short step; if blocked, rotate toward free direction (anti-wall loop)
-  const double probe = 0.35;
-  const double px = x + std::cos(yaw) * probe;
-  const double py = y + std::sin(yaw) * probe;
-  if (!path.empty() && (std::abs(alpha) < 0.5)) {
-    // geometric pursuit when heading is roughly aligned
-    v = (std::abs(alpha) > 0.4 ? 0.15 : 0.35);
+  if (std::abs(alpha) < 0.5) {
+    v = (std::abs(alpha) > 0.4 ? 0.12 : 0.28);
     w = 2.0 * v * std::sin(alpha) / dist;
     if (w > 1.0) w = 1.0;
     if (w < -1.0) w = -1.0;
     return;
   }
-  // Slower turn while correcting medium heading error
-  v = 0.12;
+  v = 0.10;
   w = (alpha >= 0.0 ? 1.0 : -1.0) * 0.7;
 }
 
@@ -305,6 +400,21 @@ inline std::string path_to_json(const std::vector<std::pair<double, double>>& pa
       s += ",";
     }
     s += "[" + std::to_string(path[i].first) + "," + std::to_string(path[i].second) + "]";
+  }
+  s += "]";
+  return s;
+}
+
+// Flat [x0,y0,x1,y1,...] for console canvas (avoids nested-array QML pitfalls).
+inline std::string path_to_flat_json(
+    const std::vector<std::pair<double, double>>& path)
+{
+  std::string s = "[";
+  for (size_t i = 0; i < path.size(); ++i) {
+    if (i) {
+      s += ",";
+    }
+    s += std::to_string(path[i].first) + "," + std::to_string(path[i].second);
   }
   s += "]";
   return s;

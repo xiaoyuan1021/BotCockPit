@@ -16,6 +16,14 @@ Pane {
                                      && robotState.hasRobotState
     readonly property bool canEstop: robotState.connected
 
+    // Map domain matches nav.hpp: x∈[0,20], y∈[-5,5]
+    readonly property bool goalInRange: {
+        var x = parseFloat(xField.text)
+        var y = parseFloat(yField.text)
+        return isFinite(x) && isFinite(y)
+                && x >= 0.0 && x <= 20.0 && y >= -5.0 && y <= 5.0
+    }
+
     property color phaseColor: {
         if (!robotState.connected) return "#5d6b80"
         if (robotState.estop) return "#c62828"
@@ -178,45 +186,60 @@ Pane {
                                 border.color: "#cfd8e6"
                             }
                         }
-                        Text { text: "x (m)"; color: "#5d6b80" }
+                        Text { text: qsTr("x (0…20 m)"); color: "#5d6b80" }
                         TextField {
                             id: xField
                             text: "18.0"
                             Layout.fillWidth: true
                             enabled: controlPage.canDrive
                             color: "#1c2430"
+                            validator: DoubleValidator {
+                                bottom: 0.0
+                                top: 20.0
+                                notation: DoubleValidator.StandardNotation
+                                locale: "C"
+                                decimals: 3
+                            }
                             background: Rectangle {
                                 implicitHeight: 36
                                 radius: 6
                                 color: "#eef2f7"
-                                border.color: "#cfd8e6"
+                                border.color: controlPage.goalInRange ? "#cfd8e6" : "#c62828"
                             }
                         }
-                        Text { text: "y (m)"; color: "#5d6b80" }
+                        Text { text: qsTr("y (-5…5 m)"); color: "#5d6b80" }
                         TextField {
                             id: yField
                             text: "0.0"
                             Layout.fillWidth: true
                             enabled: controlPage.canDrive
                             color: "#1c2430"
+                            validator: DoubleValidator {
+                                bottom: -5.0
+                                top: 5.0
+                                notation: DoubleValidator.StandardNotation
+                                locale: "C"
+                                decimals: 3
+                            }
                             background: Rectangle {
                                 implicitHeight: 36
                                 radius: 6
                                 color: "#eef2f7"
-                                border.color: "#cfd8e6"
+                                border.color: controlPage.goalInRange ? "#cfd8e6" : "#c62828"
                             }
                         }
                         ToolBtn {
                             text: qsTr("Send goto")
                             Layout.fillWidth: true
                             Layout.preferredHeight: 40
-                            enabled: controlPage.canDrive
+                            enabled: controlPage.canDrive && controlPage.goalInRange
                             onClicked: connection.cmdTaskGoto(taskIdField.text.trim(),
                                                               parseFloat(xField.text),
                                                               parseFloat(yField.text))
                         }
                         ToolBtn {
                             text: qsTr("Pause")
+                            Layout.fillWidth: true
                             Layout.preferredHeight: 40
                             enabled: controlPage.linkOk && robotState.phase === "RUNNING"
                             accent: "#b07000"
@@ -237,9 +260,9 @@ Pane {
                             enabled: controlPage.linkOk
                             onClicked: connection.cmdTaskSimple("cancel")
                         }
-                        Text { text: "err"; color: "#5d6b80" }
+                        Text { text: qsTr("track err"); color: "#5d6b80" }
                         Text {
-                            Layout.columnSpan: 3
+                            Layout.fillWidth: true
                             text: robotState.trackErr.toFixed(3) + " m"
                             font.bold: true
                             color: robotState.trackErr > 1.0 ? "#c62828" : "#1c2430"

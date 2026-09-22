@@ -2,6 +2,10 @@
 
 #include <QDateTime>
 
+#include <cmath>
+#include <limits>
+#include <utility>
+
 RobotState::RobotState(QObject* parent) : QObject(parent) {}
 
 void RobotState::setAutoReconnect(bool v)
@@ -136,7 +140,15 @@ void RobotState::resetRemote()
     task_status_ = QStringLiteral("NONE");
     faults_summary_.clear();
     fault_count_ = 0;
+    nav_path_.clear();
+    nav_trail_.clear();
+    nav_path_flat_.clear();
+    nav_trail_flat_.clear();
+    nav_idx_ = 0;
+    nav_path_len_ = 0;
     rtt_ms_ = 0;
+    emit navStatusChanged();
+    emit navTrailChanged();
     emit connChanged();
     emit modeChanged();
     emit phaseChanged();
@@ -291,38 +303,88 @@ void RobotState::applyState(const QVariantMap& map)
         const QVariantMap nm = nav.toMap();
         const QString st = nm.value(QStringLiteral("status")).toString();
         const int plen = nm.value(QStringLiteral("path_len")).toInt();
-        QVariantList pts;
-        const QVariant pathv = nm.value(QStringLiteral("path"));
-        if (pathv.canConvert<QVariantList>()) {
-            const QVariantList pl = pathv.toList();
-            for (const QVariant& item : pl) {
-                if (item.canConvert<QVariantList>()) {
-                    const QVariantList xy = item.toList();
-                    if (xy.size() >= 2) {
-                        pts.append(QVariantList{xy.at(0).toDouble(), xy.at(1).toDouble()});
-                    }
-                } else if (item.canConvert<QVariantMap>()) {
-                    const QVariantMap pm = item.toMap();
-                    pts.append(QVariantList{pm.value(QStringLiteral("x")).toDouble(),
-                                            pm.value(QStringLiteral("y")).toDouble()});
-                }
-            }
-        }
         const QVariantMap goal = nm.value(QStringLiteral("goal")).toMap();
         const double gx = goal.value(QStringLiteral("x")).toDouble();
         const double gy = goal.value(QStringLiteral("y")).toDouble();
         const double te = nm.value(QStringLiteral("track_err")).toDouble();
+        const int idx = nm.value(QStringLiteral("idx")).toInt();
+
+        auto parseXYList = [](const QVariant& flatSeq, const QVariant& nestedSeq) {
+            QVariantList pairs;
+            QVariantList flat;
+            // Preferred: flat [x0,y0,x1,y1,...] of plain numbers
+            const QVariantList fl = flatSeq.toList();
+            if (fl.size() >= 2) {
+                for (int i = 0; i + 1 < fl.size(); i += 2) {
+                    const double x = fl.at(i).toDouble();
+                    const double y = fl.at(i + 1).toDouble();
+                    if (!std::isfinite(x) || !std::isfinite(y)) {
+                        continue;
+                    }
+                    pairs.append(QVariantList{x, y});
+                    flat.append(x);
+                    flat.append(y);
+                }
+                if (!pairs.isEmpty()) {
+                    return std::make_pair(pairs, flat);
+                }
+            }
+            // Nested [[x,y],...] or [{x,y},...]
+            const QVariantList pl = nestedSeq.toList();
+            for (const QVariant& item : pl) {
+                double x = std::numeric_limits<double>::quiet_NaN();
+                double y = std::numeric_limits<double>::quiet_NaN();
+                const QVariantList xy = item.toList();
+                if (xy.size() >= 2) {
+                    x = xy.at(0).toDouble();
+                    y = xy.at(1).toDouble();
+                } else {
+                    const QVariantMap pm = item.toMap();
+                    if (pm.contains(QStringLiteral("x")) &&
+                        pm.contains(QStringLiteral("y"))) {
+                        x = pm.value(QStringLiteral("x")).toDouble();
+                        y = pm.value(QStringLiteral("y")).toDouble();
+                    }
+                }
+                if (!std::isfinite(x) || !std::isfinite(y)) {
+                    continue;
+                }
+                pairs.append(QVariantList{x, y});
+                flat.append(x);
+                flat.append(y);
+            }
+            return std::make_pair(pairs, flat);
+        };
+
+        const auto pathXY = parseXYList(nm.value(QStringLiteral("path_flat")),
+                                        nm.value(QStringLiteral("path")));
+        const auto trailXY = parseXYList(nm.value(QStringLiteral("trail_flat")),
+                                         nm.value(QStringLiteral("trail")));
+        const QVariantList pts = pathXY.first;
+        const QVariantList trail = trailXY.first;
+
         const bool changed = st != nav_status_ || plen != nav_path_len_ ||
+                             idx != nav_idx_ ||
                              gx != nav_goal_x_ || gy != nav_goal_y_ ||
-                             te != track_err_ || pts.size() != nav_path_.size();
+                             te != track_err_ || pts.size() != nav_path_.size() ||
+                             pathXY.second != nav_path_flat_;
+        const bool trailDirty = trail.size() != nav_trail_.size() ||
+                                trailXY.second != nav_trail_flat_;
         nav_status_ = st.isEmpty() ? QStringLiteral("IDLE") : st;
         nav_path_len_ = plen;
+        nav_idx_ = idx;
         nav_path_ = pts;
+        nav_path_flat_ = pathXY.second;
         nav_goal_x_ = gx;
         nav_goal_y_ = gy;
         if (te != track_err_) {
             track_err_ = te;
             emit trackErrChanged();
+        }
+        if (trailDirty) {
+            nav_trail_ = trail;
+            nav_trail_flat_ = trailXY.second;
+            emit navTrailChanged();
         }
         if (changed) {
             emit navStatusChanged();
