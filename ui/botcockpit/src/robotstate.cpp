@@ -291,9 +291,40 @@ void RobotState::applyState(const QVariantMap& map)
         const QVariantMap nm = nav.toMap();
         const QString st = nm.value(QStringLiteral("status")).toString();
         const int plen = nm.value(QStringLiteral("path_len")).toInt();
-        if (st != nav_status_ || plen != nav_path_len_) {
-            nav_status_ = st.isEmpty() ? QStringLiteral("IDLE") : st;
-            nav_path_len_ = plen;
+        QVariantList pts;
+        const QVariant pathv = nm.value(QStringLiteral("path"));
+        if (pathv.canConvert<QVariantList>()) {
+            const QVariantList pl = pathv.toList();
+            for (const QVariant& item : pl) {
+                if (item.canConvert<QVariantList>()) {
+                    const QVariantList xy = item.toList();
+                    if (xy.size() >= 2) {
+                        pts.append(QVariantList{xy.at(0).toDouble(), xy.at(1).toDouble()});
+                    }
+                } else if (item.canConvert<QVariantMap>()) {
+                    const QVariantMap pm = item.toMap();
+                    pts.append(QVariantList{pm.value(QStringLiteral("x")).toDouble(),
+                                            pm.value(QStringLiteral("y")).toDouble()});
+                }
+            }
+        }
+        const QVariantMap goal = nm.value(QStringLiteral("goal")).toMap();
+        const double gx = goal.value(QStringLiteral("x")).toDouble();
+        const double gy = goal.value(QStringLiteral("y")).toDouble();
+        const double te = nm.value(QStringLiteral("track_err")).toDouble();
+        const bool changed = st != nav_status_ || plen != nav_path_len_ ||
+                             gx != nav_goal_x_ || gy != nav_goal_y_ ||
+                             te != track_err_ || pts.size() != nav_path_.size();
+        nav_status_ = st.isEmpty() ? QStringLiteral("IDLE") : st;
+        nav_path_len_ = plen;
+        nav_path_ = pts;
+        nav_goal_x_ = gx;
+        nav_goal_y_ = gy;
+        if (te != track_err_) {
+            track_err_ = te;
+            emit trackErrChanged();
+        }
+        if (changed) {
             emit navStatusChanged();
         }
     }

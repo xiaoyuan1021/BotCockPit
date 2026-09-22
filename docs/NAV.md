@@ -26,7 +26,9 @@
 
 ## 后续（可选）
 
-- QML Canvas 画 path/障碍  
+- ~~QML Canvas 画 path/障碍~~ → **NavMapView.qml**（走廊图 + 路径 + 位姿箭头 + 目标十字）  
+- ~~跟踪误差~~ → state.nav.track_err / UI `err x.xxx m`；误差 &gt;1.5 m 判失败  
+- ~~TCP 路径脚本~~ → `tools/test_tcp_nav.py`（HELLO/粘包/TASK/ESTOP）  
 - 动态障碍与重规划  
-- 跟踪误差指标进 Dashboard  
+- 跟踪误差历史曲线  
 - Gazebo 接入（第二阶段）

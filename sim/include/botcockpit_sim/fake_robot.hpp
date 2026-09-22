@@ -99,6 +99,8 @@ class FakeRobot : public rclcpp_lifecycle::LifecycleNode {
   size_t nav_idx_ = 0;
   std::string nav_status_ = "IDLE";  // IDLE/PLANNING/TRACKING/FAILED
   bool nav_ready_ = false;
+  double track_err_ = 0.0;
+  double track_err_max_ = 0.0;
 
   std::chrono::steady_clock::time_point idle_tp_{};
   std::chrono::steady_clock::time_point last_tick_tp_{};

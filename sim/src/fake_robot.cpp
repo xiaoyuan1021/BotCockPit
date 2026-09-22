@@ -397,6 +397,38 @@ void FakeRobot::tick()
       }
       task_status_ = "EXECUTING";
       nav_status_ = "TRACKING";
+      // cross-track error to current segment
+      if (nav_idx_ < nav_path_.size()) {
+        const size_t j = std::min(nav_idx_ + 1, nav_path_.size() - 1);
+        const double ax = nav_path_[nav_idx_].first;
+        const double ay = nav_path_[nav_idx_].second;
+        const double bx = nav_path_[j].first;
+        const double by = nav_path_[j].second;
+        const double abx = bx - ax;
+        const double aby = by - ay;
+        const double apx = pose_x_ - ax;
+        const double apy = pose_y_ - ay;
+        const double ab2 = abx * abx + aby * aby;
+        double cr = 0.0;
+        if (ab2 > 1e-6) {
+          cr = std::abs(abx * apy - aby * apx) / std::sqrt(ab2);
+        } else {
+          cr = dist(pose_x_, pose_y_, ax, ay);
+        }
+        track_err_ = cr;
+        if (cr > track_err_max_) {
+          track_err_max_ = cr;
+        }
+        if (cr > 1.5) {
+          // Lost the path — fail with recoverable error for next goto
+          task_status_ = "FAILED";
+          phase_ = "IDLE";
+          nav_status_ = "FAILED";
+          faults_.push_back({"E_TASK_FAILED", "ERROR", "fake_robot",
+                             "tracking error too large", true});
+          recompute_phase_and_control();
+        }
+      }
       const auto& goal_wp = nav_path_.back();
       if (nav_idx_ + 1 >= nav_path_.size() &&
           dist(pose_x_, pose_y_, goal_wp.first, goal_wp.second) < 0.35) {
@@ -505,7 +537,9 @@ std::string FakeRobot::build_state_json() const
   // Plan A nav summary (path for future canvas; path_len for UI)
   oss << ",\"nav\":{\"status\":\"" << esc(nav_status_) << "\",\"path_len\":"
       << nav_path_.size() << ",\"path\":" << nav::path_to_json(nav_path_)
-      << ",\"goal\":{\"x\":" << goal_x_ << ",\"y\":" << goal_y_ << "}}";
+      << ",\"goal\":{\"x\":" << goal_x_ << ",\"y\":" << goal_y_ << "}"
+      << ",\"track_err\":" << track_err_ << ",\"track_err_max\":" << track_err_max_
+      << "}";
   oss << "}";
   return oss.str();
 }

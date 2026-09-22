@@ -8,5 +8,6 @@
         <file>SettingsPage.qml</file>
         <file>LiveDot.qml</file>
         <file>ToolBtn.qml</file>
+        <file>NavMapView.qml</file>
     </qresource>
 </RCC>

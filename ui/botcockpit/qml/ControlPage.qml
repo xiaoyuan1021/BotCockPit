@@ -28,18 +28,18 @@ Pane {
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 4
-        spacing: 10
+        spacing: 8
 
         Text {
             text: qsTr("Control")
             font.pixelSize: 22
             font.bold: true
-            color: controlPage.win ? controlPage.win.colInk : "#1c2430"
+            color: "#1c2430"
         }
 
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 64
+            Layout.preferredHeight: 56
             radius: 12
             color: controlPage.phaseColor
             Behavior on color { ColorAnimation { duration: 220 } }
@@ -59,8 +59,8 @@ Pane {
 
             RowLayout {
                 anchors.fill: parent
-                anchors.margins: 12
-                spacing: 16
+                anchors.margins: 10
+                spacing: 12
                 Text {
                     Layout.fillWidth: true
                     text: {
@@ -69,19 +69,17 @@ Pane {
                                + (robotState.estop ? qsTr(" / ESTOP") : "")
                     }
                     color: "#ffffff"
-                    font.pixelSize: 20
+                    font.pixelSize: 18
                     font.bold: true
                 }
                 Text {
                     text: {
                         var t = robotState.taskType.length ? robotState.taskType : "—"
-                        var id = robotState.taskId.length ? robotState.taskId : ""
                         return qsTr("TASK: ") + t + " · " + robotState.taskStatus
-                               + (id ? (" · " + id) : "")
                     }
                     color: "#ffffff"
                     elide: Text.ElideRight
-                    Layout.maximumWidth: 300
+                    Layout.maximumWidth: 220
                 }
                 Text {
                     text: robotState.controlEnabled ? qsTr("ctl ON") : qsTr("ctl OFF")
@@ -94,237 +92,219 @@ Pane {
                           + (robotState.navPathLen ? (" · " + robotState.navPathLen + " wp") : "")
                     color: "#ffffff"
                     font.bold: true
-                    font.pixelSize: 14
-                }
-            }
-        }
-
-        Text {
-            visible: robotState.connected && robotState.phase === "RUNNING"
-            text: qsTr("Task running — pose is moving; phase returns to IDLE when goal is reached (DONE).")
-            color: controlPage.win ? controlPage.win.colMuted : "#5d6b80"
-            wrapMode: Text.WordWrap
-            Layout.fillWidth: true
-        }
-
-        Rectangle {
-            Layout.fillWidth: true
-            radius: 10
-            color: controlPage.win ? controlPage.win.colSurface : "#ffffff"
-            border.color: controlPage.win ? controlPage.win.colBorder : "#cfd8e6"
-            implicitHeight: modeRow.implicitHeight + 24
-            RowLayout {
-                id: modeRow
-                anchors.fill: parent
-                anchors.margins: 12
-                spacing: 8
-                Text {
-                    text: qsTr("Mode")
-                    color: controlPage.win ? controlPage.win.colMuted : "#5d6b80"
-                    font.bold: true
-                }
-                ToolBtn {
-                    text: "TELEOP"
-                    enabled: controlPage.canDrive || (controlPage.linkOk && robotState.mode === "TELEOP")
-                    accent: robotState.mode === "TELEOP" ? "#0f8a4a" : "#1a6fd4"
-                    onClicked: connection.cmdMode("TELEOP")
-                }
-                ToolBtn {
-                    text: "AUTO"
-                    enabled: controlPage.canDrive
-                    accent: robotState.mode === "AUTO" ? "#0f8a4a" : "#1a6fd4"
-                    onClicked: connection.cmdMode("AUTO")
-                }
-                ToolBtn {
-                    text: "REMOTE"
-                    enabled: controlPage.canDrive || (controlPage.linkOk && robotState.mode === "REMOTE")
-                    accent: robotState.mode === "REMOTE" ? "#0f8a4a" : "#1a6fd4"
-                    onClicked: connection.cmdMode("REMOTE")
-                }
-                Item { Layout.fillWidth: true }
-                Text {
-                    text: qsTr("current: ") + robotState.mode
-                    color: controlPage.win ? controlPage.win.colMuted : "#5d6b80"
-                }
-            }
-        }
-
-        Rectangle {
-            Layout.fillWidth: true
-            radius: 10
-            color: controlPage.win ? controlPage.win.colSurface : "#ffffff"
-            border.color: controlPage.win ? controlPage.win.colBorder : "#cfd8e6"
-            implicitHeight: taskGrid.implicitHeight + 24
-            GridLayout {
-                id: taskGrid
-                anchors.fill: parent
-                anchors.margins: 12
-                columns: 6
-                columnSpacing: 8
-                rowSpacing: 8
-
-                Text { text: "task_id"; color: "#5d6b80" }
-                TextField {
-                    id: taskIdField
-                    text: "T-001"
-                    Layout.preferredWidth: 100
-                    enabled: controlPage.canDrive
-                    color: "#1c2430"
-                    background: Rectangle {
-                        implicitHeight: 32
-                        radius: 6
-                        color: "#eef2f7"
-                        border.color: "#cfd8e6"
-                    }
-                }
-                Text { text: "x"; color: "#5d6b80" }
-                TextField {
-                    id: xField
-                    text: "8.0"
-                    Layout.preferredWidth: 70
-                    enabled: controlPage.canDrive
-                    color: "#1c2430"
-                    background: Rectangle {
-                        implicitHeight: 32
-                        radius: 6
-                        color: "#eef2f7"
-                        border.color: "#cfd8e6"
-                    }
-                }
-                Text { text: "y"; color: "#5d6b80" }
-                TextField {
-                    id: yField
-                    text: "0.0"
-                    Layout.preferredWidth: 70
-                    enabled: controlPage.canDrive
-                    color: "#1c2430"
-                    background: Rectangle {
-                        implicitHeight: 32
-                        radius: 6
-                        color: "#eef2f7"
-                        border.color: "#cfd8e6"
-                    }
-                }
-
-                ToolBtn {
-                    text: qsTr("Send goto")
-                    enabled: controlPage.canDrive
-                    onClicked: connection.cmdTaskGoto(taskIdField.text.trim(),
-                                                      parseFloat(xField.text),
-                                                      parseFloat(yField.text))
-                }
-                ToolBtn {
-                    text: qsTr("Pause")
-                    enabled: controlPage.linkOk && robotState.phase === "RUNNING"
-                    accent: "#b07000"
-                    onClicked: connection.cmdTaskSimple("pause")
-                }
-                ToolBtn {
-                    text: qsTr("Resume")
-                    enabled: controlPage.linkOk && !robotState.estop && robotState.taskType === "goto"
-                    accent: "#0f8a4a"
-                    onClicked: connection.cmdTaskSimple("resume")
-                }
-                ToolBtn {
-                    text: qsTr("Cancel")
-                    enabled: controlPage.linkOk
-                    accent: "#5d6b80"
-                    onClicked: connection.cmdTaskSimple("cancel")
-                }
-                Text { text: qsTr("task"); color: "#5d6b80" }
-                Text {
-                    Layout.columnSpan: 3
-                    text: (robotState.taskType.length ? robotState.taskType : "—")
-                          + " · " + robotState.taskStatus
-                          + (robotState.taskId.length ? (" · " + robotState.taskId) : "")
-                    color: "#1c2430"
-                    font.bold: true
+                    font.pixelSize: 13
                 }
             }
         }
 
         RowLayout {
             Layout.fillWidth: true
+            Layout.fillHeight: true
             spacing: 12
 
-            Button {
-                id: estopBtn
-                text: qsTr("SOFT E-STOP")
-                enabled: controlPage.canEstop
-                Layout.preferredWidth: 180
-                Layout.preferredHeight: 52
-                font.pixelSize: 16
-                font.bold: true
-                contentItem: Text {
-                    text: estopBtn.text
-                    color: "#ffffff"
-                    font: estopBtn.font
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-                background: Rectangle {
-                    radius: 10
-                    color: estopBtn.pressed ? "#b71c1c"
-                         : estopBtn.hovered ? "#e53935" : "#c62828"
-                    border.color: "#8e0000"
-                    border.width: 1
-                }
-                onClicked: estopConfirm.open()
+            NavMapView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.minimumHeight: 200
             }
-
-            ToolBtn {
-                text: qsTr("Reset fault / ESTOP")
-                Layout.preferredWidth: 190
-                Layout.preferredHeight: 52
-                enabled: controlPage.linkOk && robotState.hasRobotState
-                         && (robotState.estop || robotState.phase === "FAULT"
-                             || robotState.phase === "DEGRADED"
-                             || robotState.phase === "IDLE")
-                accent: "#b07000"
-                onClicked: resetConfirm.open()
-            }
-
-            Item { Layout.fillWidth: true }
-        }
-
-        Rectangle {
-            Layout.fillWidth: true
-            radius: 10
-            color: controlPage.win ? controlPage.win.colSurface : "#ffffff"
-            border.color: {
-                if (!robotState.lastCmdAckText.length)
-                    return controlPage.win ? controlPage.win.colBorder : "#cfd8e6"
-                return robotState.lastCmdOk ? "#0f8a4a" : "#c62828"
-            }
-            implicitHeight: ackCol.implicitHeight + 20
 
             ColumnLayout {
-                id: ackCol
-                anchors.fill: parent
-                anchors.margins: 12
-                spacing: 4
-                Text {
-                    text: qsTr("Last command ACK")
-                    color: "#5d6b80"
-                    font.bold: true
-                }
-                Text {
-                    text: robotState.lastCmdAckText.length
-                          ? robotState.lastCmdAckText
-                          : qsTr("(none yet)")
-                    color: robotState.lastCmdAckText.length === 0 ? "#5d6b80"
-                         : (robotState.lastCmdOk ? "#0f8a4a" : "#c62828")
+                Layout.preferredWidth: 360
+                Layout.fillHeight: true
+                spacing: 8
+
+                Rectangle {
                     Layout.fillWidth: true
-                    wrapMode: Text.Wrap
-                    font.bold: true
+                    radius: 10
+                    color: "#ffffff"
+                    border.color: "#cfd8e6"
+                    implicitHeight: modeRow.implicitHeight + 20
+                    RowLayout {
+                        id: modeRow
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        spacing: 8
+                        Text { text: qsTr("Mode"); color: "#5d6b80"; font.bold: true }
+                        ToolBtn {
+                            text: "TELEOP"
+                            enabled: controlPage.canDrive || (controlPage.linkOk && robotState.mode === "TELEOP")
+                            accent: robotState.mode === "TELEOP" ? "#0f8a4a" : "#1a6fd4"
+                            onClicked: connection.cmdMode("TELEOP")
+                        }
+                        ToolBtn {
+                            text: "AUTO"
+                            enabled: controlPage.canDrive
+                            accent: robotState.mode === "AUTO" ? "#0f8a4a" : "#1a6fd4"
+                            onClicked: connection.cmdMode("AUTO")
+                        }
+                        ToolBtn {
+                            text: "REMOTE"
+                            enabled: controlPage.canDrive || (controlPage.linkOk && robotState.mode === "REMOTE")
+                            accent: robotState.mode === "REMOTE" ? "#0f8a4a" : "#1a6fd4"
+                            onClicked: connection.cmdMode("REMOTE")
+                        }
+                        Item { Layout.fillWidth: true }
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    radius: 10
+                    color: "#ffffff"
+                    border.color: "#cfd8e6"
+                    implicitHeight: taskGrid.implicitHeight + 20
+                    GridLayout {
+                        id: taskGrid
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        columns: 4
+                        columnSpacing: 8
+                        rowSpacing: 6
+
+                        Text { text: "task_id"; color: "#5d6b80" }
+                        TextField {
+                            id: taskIdField
+                            text: "T-001"
+                            Layout.columnSpan: 3
+                            enabled: controlPage.canDrive
+                            color: "#1c2430"
+                            background: Rectangle {
+                                implicitHeight: 30
+                                radius: 6
+                                color: "#eef2f7"
+                                border.color: "#cfd8e6"
+                            }
+                        }
+                        Text { text: "x"; color: "#5d6b80" }
+                        TextField {
+                            id: xField
+                            text: "18.0"
+                            enabled: controlPage.canDrive
+                            color: "#1c2430"
+                            background: Rectangle {
+                                implicitHeight: 30
+                                radius: 6
+                                color: "#eef2f7"
+                                border.color: "#cfd8e6"
+                            }
+                        }
+                        Text { text: "y"; color: "#5d6b80" }
+                        TextField {
+                            id: yField
+                            text: "0.0"
+                            enabled: controlPage.canDrive
+                            color: "#1c2430"
+                            background: Rectangle {
+                                implicitHeight: 30
+                                radius: 6
+                                color: "#eef2f7"
+                                border.color: "#cfd8e6"
+                            }
+                        }
+                        ToolBtn {
+                            text: qsTr("Send goto")
+                            Layout.columnSpan: 2
+                            enabled: controlPage.canDrive
+                            onClicked: connection.cmdTaskGoto(taskIdField.text.trim(),
+                                                              parseFloat(xField.text),
+                                                              parseFloat(yField.text))
+                        }
+                        ToolBtn {
+                            text: qsTr("Pause")
+                            enabled: controlPage.linkOk && robotState.phase === "RUNNING"
+                            accent: "#b07000"
+                            onClicked: connection.cmdTaskSimple("pause")
+                        }
+                        ToolBtn {
+                            text: qsTr("Resume")
+                            enabled: controlPage.linkOk && !robotState.estop && robotState.taskType === "goto"
+                            accent: "#0f8a4a"
+                            onClicked: connection.cmdTaskSimple("resume")
+                        }
+                        ToolBtn {
+                            text: qsTr("Cancel")
+                            Layout.columnSpan: 2
+                            enabled: controlPage.linkOk
+                            onClicked: connection.cmdTaskSimple("cancel")
+                        }
+                        Text { text: "err"; color: "#5d6b80" }
+                        Text {
+                            Layout.columnSpan: 3
+                            text: robotState.trackErr.toFixed(3) + " m"
+                            font.bold: true
+                            color: robotState.trackErr > 1.0 ? "#c62828" : "#1c2430"
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+                    Button {
+                        id: estopBtn
+                        text: qsTr("SOFT E-STOP")
+                        enabled: controlPage.canEstop
+                        Layout.preferredWidth: 160
+                        Layout.preferredHeight: 48
+                        font.bold: true
+                        contentItem: Text {
+                            text: estopBtn.text
+                            color: "#ffffff"
+                            font: estopBtn.font
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            radius: 10
+                            color: estopBtn.pressed ? "#b71c1c"
+                                 : estopBtn.hovered ? "#e53935" : "#c62828"
+                        }
+                        onClicked: estopConfirm.open()
+                    }
+                    ToolBtn {
+                        text: qsTr("Reset")
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 48
+                        enabled: controlPage.linkOk && robotState.hasRobotState
+                                 && (robotState.estop || robotState.phase === "FAULT"
+                                     || robotState.phase === "DEGRADED"
+                                     || robotState.phase === "IDLE")
+                        accent: "#b07000"
+                        onClicked: resetConfirm.open()
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    radius: 10
+                    color: "#ffffff"
+                    border.color: robotState.lastCmdAckText.length === 0 ? "#cfd8e6"
+                                 : (robotState.lastCmdOk ? "#0f8a4a" : "#c62828")
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        Text {
+                            text: qsTr("Last ACK")
+                            color: "#5d6b80"
+                            font.bold: true
+                        }
+                        Text {
+                            text: robotState.lastCmdAckText.length
+                                  ? robotState.lastCmdAckText
+                                  : qsTr("(none yet)")
+                            color: robotState.lastCmdOk ? "#0f8a4a" : "#1c2430"
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            font.bold: true
+                        }
+                        Item { Layout.fillHeight: true }
+                    }
                 }
             }
         }
-
-        Item { Layout.fillHeight: true }
     }
 
-    // Fixed-size content item avoids Dialog implicitHeight binding loops
     Dialog {
         id: estopConfirm
         modal: true
@@ -340,7 +320,7 @@ Pane {
                 width: 400
                 wrapMode: Text.WordWrap
                 color: "#1c2430"
-                text: qsTr("Send CMD_ESTOP? Motion will stop immediately. Recovery requires Reset with no ERROR faults.")
+                text: qsTr("Send CMD_ESTOP? Motion stops immediately. Reset required to recover.")
             }
         }
         onAccepted: connection.cmdEstop("operator")
@@ -361,7 +341,7 @@ Pane {
                 width: 400
                 wrapMode: Text.WordWrap
                 color: "#1c2430"
-                text: qsTr("Send CMD_RESET with confirm=true? This clears ESTOP when no ERROR fault source remains.")
+                text: qsTr("Send CMD_RESET confirm=true? Clears ESTOP when no ERROR fault remains.")
             }
         }
         onAccepted: connection.cmdReset()
