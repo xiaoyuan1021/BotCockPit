@@ -159,45 +159,48 @@ Pane {
                         id: taskGrid
                         anchors.fill: parent
                         anchors.margins: 10
-                        columns: 4
-                        columnSpacing: 8
-                        rowSpacing: 6
+                        columns: 2
+                        columnSpacing: 12
+                        rowSpacing: 10
 
                         Text { text: "task_id"; color: "#5d6b80" }
                         TextField {
                             id: taskIdField
-                            text: "T-001"
-                            Layout.columnSpan: 3
+                            placeholderText: qsTr("auto if empty")
+                            text: ""
+                            Layout.fillWidth: true
                             enabled: controlPage.canDrive
                             color: "#1c2430"
                             background: Rectangle {
-                                implicitHeight: 30
+                                implicitHeight: 36
                                 radius: 6
                                 color: "#eef2f7"
                                 border.color: "#cfd8e6"
                             }
                         }
-                        Text { text: "x"; color: "#5d6b80" }
+                        Text { text: "x (m)"; color: "#5d6b80" }
                         TextField {
                             id: xField
                             text: "18.0"
+                            Layout.fillWidth: true
                             enabled: controlPage.canDrive
                             color: "#1c2430"
                             background: Rectangle {
-                                implicitHeight: 30
+                                implicitHeight: 36
                                 radius: 6
                                 color: "#eef2f7"
                                 border.color: "#cfd8e6"
                             }
                         }
-                        Text { text: "y"; color: "#5d6b80" }
+                        Text { text: "y (m)"; color: "#5d6b80" }
                         TextField {
                             id: yField
                             text: "0.0"
+                            Layout.fillWidth: true
                             enabled: controlPage.canDrive
                             color: "#1c2430"
                             background: Rectangle {
-                                implicitHeight: 30
+                                implicitHeight: 36
                                 radius: 6
                                 color: "#eef2f7"
                                 border.color: "#cfd8e6"
@@ -205,7 +208,8 @@ Pane {
                         }
                         ToolBtn {
                             text: qsTr("Send goto")
-                            Layout.columnSpan: 2
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 40
                             enabled: controlPage.canDrive
                             onClicked: connection.cmdTaskGoto(taskIdField.text.trim(),
                                                               parseFloat(xField.text),
@@ -213,19 +217,23 @@ Pane {
                         }
                         ToolBtn {
                             text: qsTr("Pause")
+                            Layout.preferredHeight: 40
                             enabled: controlPage.linkOk && robotState.phase === "RUNNING"
                             accent: "#b07000"
                             onClicked: connection.cmdTaskSimple("pause")
                         }
                         ToolBtn {
                             text: qsTr("Resume")
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 40
                             enabled: controlPage.linkOk && !robotState.estop && robotState.taskType === "goto"
                             accent: "#0f8a4a"
                             onClicked: connection.cmdTaskSimple("resume")
                         }
                         ToolBtn {
                             text: qsTr("Cancel")
-                            Layout.columnSpan: 2
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 40
                             enabled: controlPage.linkOk
                             onClicked: connection.cmdTaskSimple("cancel")
                         }

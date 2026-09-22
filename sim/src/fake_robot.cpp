@@ -383,11 +383,22 @@ void FakeRobot::tick()
   // Plan A: A* path + pure pursuit tracking (diff-drive kinematics)
   if (!estop_ && phase_ == "RUNNING" && task_type_ == "goto") {
     if (!nav_path_.empty()) {
+      const auto pose_before = std::make_pair(pose_x_, pose_y_);
       double v = 0.0, w = 0.0;
-      nav::pure_pursuit(pose_x_, pose_y_, pose_yaw_, nav_path_, nav_idx_, 0.7,
+      nav::pure_pursuit(pose_x_, pose_y_, pose_yaw_, nav_path_, nav_idx_, 0.55,
                         v, w);
-      pose_x_ += v * std::cos(pose_yaw_) * dt;
-      pose_y_ += v * std::sin(pose_yaw_) * dt;
+      double nx = pose_x_ + v * std::cos(pose_yaw_) * dt;
+      double ny = pose_y_ + v * std::sin(pose_yaw_) * dt;
+      // Collision guard: never step into inflated obstacle
+      if (!nav::is_free(nav_map_, nx, ny)) {
+        // Rotate toward path instead of plowing the wall (anti-circle/stuck)
+        v = 0.0;
+        w = (w >= 0.0 ? 1.0 : -1.0) * 0.8;
+        nx = pose_x_;
+        ny = pose_y_;
+      }
+      pose_x_ = nx;
+      pose_y_ = ny;
       pose_yaw_ += w * dt;
       while (pose_yaw_ > M_PI) {
         pose_yaw_ -= 2 * M_PI;
@@ -397,6 +408,25 @@ void FakeRobot::tick()
       }
       task_status_ = "EXECUTING";
       nav_status_ = "TRACKING";
+
+      // Stuck detection → replan from current pose
+      const double moved =
+          dist(pose_before.first, pose_before.second, pose_x_, pose_y_);
+      stuck_s_ = (moved < 0.002 * std::max(1.0, dt / 0.2))
+                     ? (stuck_s_ + dt)
+                     : 0.0;
+      if (stuck_s_ > 1.2) {
+        stuck_s_ = 0.0;
+        nav_map_ = nav::GridMap::make_corridor_demo();
+        nav_map_.inflate(1);
+        auto replanned = nav::astar(nav_map_, pose_x_, pose_y_, goal_x_, goal_y_);
+        if (!replanned.empty()) {
+          nav_path_ = std::move(replanned);
+          nav_idx_ = 0;
+          nav_status_ = "TRACKING";
+        }
+      }
+
       // cross-track error to current segment
       if (nav_idx_ < nav_path_.size()) {
         const size_t j = std::min(nav_idx_ + 1, nav_path_.size() - 1);
@@ -420,7 +450,6 @@ void FakeRobot::tick()
           track_err_max_ = cr;
         }
         if (cr > 1.5) {
-          // Lost the path — fail with recoverable error for next goto
           task_status_ = "FAILED";
           phase_ = "IDLE";
           nav_status_ = "FAILED";
@@ -429,6 +458,7 @@ void FakeRobot::tick()
           recompute_phase_and_control();
         }
       }
+
       const auto& goal_wp = nav_path_.back();
       if (nav_idx_ + 1 >= nav_path_.size() &&
           dist(pose_x_, pose_y_, goal_wp.first, goal_wp.second) < 0.35) {
@@ -438,10 +468,10 @@ void FakeRobot::tick()
         task_status_ = "DONE";
         phase_ = "IDLE";
         nav_status_ = "IDLE";
+        stuck_s_ = 0.0;
         recompute_phase_and_control();
       }
     } else {
-      // No path — fail task
       task_status_ = "FAILED";
       phase_ = "IDLE";
       nav_status_ = "FAILED";
@@ -449,8 +479,7 @@ void FakeRobot::tick()
     }
     battery_ -= 0.05 * dt;
   } else if (!estop_ && phase_ == "IDLE") {
-    // gentle idle drift in place only (map demo: keep on free cells)
-    pose_yaw_ += 0.05 * dt;
+    // Do not spin in place while idle (was causing "always turning" look)
     battery_ -= 0.02 * dt;
   }
 
@@ -761,7 +790,8 @@ void FakeRobot::on_cmd(const std_msgs::msg::String::SharedPtr msg)
       extract_number(data, "x", x);
       extract_number(data, "y", y);
       if (task_id.empty()) {
-        task_id = "T-nav";
+        ++task_seq_;
+        task_id = "T-" + std::to_string(task_seq_);
       }
       if (!task_id_.empty() && task_id_ == task_id && task_status_ == "DONE") {
         publish_cmd_result(seq, cmd, true, "DONE", "", task_id);

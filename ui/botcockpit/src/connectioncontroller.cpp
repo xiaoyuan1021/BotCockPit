@@ -114,10 +114,15 @@ void ConnectionController::cmdTaskGoto(const QString& taskId, double x, double y
     if (state_ && !state_->connected()) {
         return;
     }
+    // Empty taskId → robot auto-assigns T-n
+    const QString id = taskId.trimmed();
     if (state_) {
-        state_->appendLog(tr("CMD_TASK goto id=%1 (%2,%3)").arg(taskId).arg(x).arg(y));
+        state_->appendLog(tr("CMD_TASK goto id=%1 (%2,%3)")
+                              .arg(id.isEmpty() ? QStringLiteral("auto") : id)
+                              .arg(x)
+                              .arg(y));
     }
-    emit workerCmdTask(taskId, QStringLiteral("goto"), x, y, 30.0);
+    emit workerCmdTask(id, QStringLiteral("goto"), x, y, 30.0);
 }
 
 void ConnectionController::cmdTaskSimple(const QString& type)

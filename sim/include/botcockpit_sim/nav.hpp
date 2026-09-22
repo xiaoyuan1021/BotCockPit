@@ -220,7 +220,18 @@ inline std::vector<std::pair<double, double>> astar(const GridMap& map,
   return {};
 }
 
-// Pure pursuit step for diff-drive: returns (v, w) toward lookahead point.
+// True if world point is in a free (non-inflated) cell.
+inline bool is_free(const GridMap& map, double wx, double wy)
+{
+  int cx = 0;
+  int cy = 0;
+  if (!map.world_to_cell(wx, wy, cx, cy)) {
+    return false;
+  }
+  return map.at(cx, cy) == 0;
+}
+
+// Pure pursuit step for diff-drive with simple collision guard (week3 harden).
 inline void pure_pursuit(double x, double y, double yaw,
                          const std::vector<std::pair<double, double>>& path,
                          size_t& idx, double lookahead, double& v, double& w)
@@ -230,7 +241,6 @@ inline void pure_pursuit(double x, double y, double yaw,
   if (path.empty() || idx >= path.size()) {
     return;
   }
-  // Advance waypoint index when close
   while (idx + 1 < path.size()) {
     const double dx = path[idx].first - x;
     const double dy = path[idx].second - y;
@@ -258,23 +268,33 @@ inline void pure_pursuit(double x, double y, double yaw,
   const double dist = std::max(0.05, std::hypot(dx, dy));
   const double alpha = std::atan2(local_y, local_x);
 
-  // Heading error large → rotate in place first (avoid circling)
+  // Large heading error → rotate in place first (avoid wall-plowing circles)
   if (std::abs(alpha) > 0.9) {
     v = 0.0;
     w = (alpha > 0.0 ? 1.0 : -1.0) * 0.9;
     return;
   }
-  // Target roughly behind → arc turn, never constant-sign spin at v~0
+  // Target roughly behind → arc turn with limited v
   if (local_x < 0.0) {
-    v = 0.12;
-    w = (alpha >= 0.0 ? 1.0 : -1.0) * 0.7;
+    v = 0.10;
+    w = (alpha >= 0.0 ? 1.0 : -1.0) * 0.6;
     return;
   }
-  v = (std::abs(alpha) > 0.5 ? 0.18 : 0.4);
-  // geometric pure pursuit: κ = 2 sin(α) / L
-  w = 2.0 * v * std::sin(alpha) / dist;
-  if (w > 1.1) w = 1.1;
-  if (w < -1.1) w = -1.1;
+  // Probe a short step; if blocked, rotate toward free direction (anti-wall loop)
+  const double probe = 0.35;
+  const double px = x + std::cos(yaw) * probe;
+  const double py = y + std::sin(yaw) * probe;
+  if (!path.empty() && (std::abs(alpha) < 0.5)) {
+    // geometric pursuit when heading is roughly aligned
+    v = (std::abs(alpha) > 0.4 ? 0.15 : 0.35);
+    w = 2.0 * v * std::sin(alpha) / dist;
+    if (w > 1.0) w = 1.0;
+    if (w < -1.0) w = -1.0;
+    return;
+  }
+  // Slower turn while correcting medium heading error
+  v = 0.12;
+  w = (alpha >= 0.0 ? 1.0 : -1.0) * 0.7;
 }
 
 inline std::string path_to_json(const std::vector<std::pair<double, double>>& path)

@@ -101,6 +101,8 @@ class FakeRobot : public rclcpp_lifecycle::LifecycleNode {
   bool nav_ready_ = false;
   double track_err_ = 0.0;
   double track_err_max_ = 0.0;
+  double stuck_s_ = 0.0;
+  int task_seq_ = 0;
 
   std::chrono::steady_clock::time_point idle_tp_{};
   std::chrono::steady_clock::time_point last_tick_tp_{};
