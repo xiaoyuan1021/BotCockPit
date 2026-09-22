@@ -75,7 +75,7 @@ Pane {
                 Text {
                     text: {
                         var t = robotState.taskType.length ? robotState.taskType : "—"
-                        return qsTr("TASK: ") + t + " · " + robotState.taskStatus
+                        return qsTr("TASK: ") + t + " | " + robotState.taskStatus
                     }
                     color: "#ffffff"
                     elide: Text.ElideRight
@@ -89,7 +89,7 @@ Pane {
                 Text {
                     visible: robotState.navStatus !== "IDLE"
                     text: qsTr("NAV: ") + robotState.navStatus
-                          + (robotState.navPathLen ? (" · " + robotState.navPathLen + " wp") : "")
+                          + (robotState.navPathLen ? (" | " + robotState.navPathLen + " wp") : "")
                     color: "#ffffff"
                     font.bold: true
                     font.pixelSize: 13

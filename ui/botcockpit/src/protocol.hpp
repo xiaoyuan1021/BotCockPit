@@ -4,6 +4,9 @@
 #include <string>
 #include <vector>
 
+// Keep MSG_* / FLAG_* in sync with bridge/include/botcockpit_bridge/protocol.hpp
+// (tools/check_protocol_sync.py).
+
 namespace botcockpit_ui {
 
 constexpr uint8_t MSG_HEARTBEAT = 0x01;
@@ -26,6 +29,9 @@ constexpr uint8_t FLAG_URGENT = 0x02;
 
 constexpr int HB_INTERVAL_MS = 1000;
 constexpr int HB_TIMEOUT_MS = 3000;
+constexpr int ACK_TIMEOUT_MS = 2000;
+constexpr int STATE_DELTA_MS = 200;
+constexpr int DEFAULT_PORT = 8765;
 
 struct Frame {
     uint8_t type = 0;

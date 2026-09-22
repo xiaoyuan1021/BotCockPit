@@ -25,7 +25,7 @@ Pane {
             Layout.alignment: Qt.AlignHCenter
         }
         Text {
-            text: qsTr("TCP protocol v0.1 · default 127.0.0.1:8765")
+            text: qsTr("TCP protocol v0.1 | default 127.0.0.1:8765")
             color: pane.win.colMuted
             Layout.alignment: Qt.AlignHCenter
         }

@@ -45,14 +45,14 @@ void RobotState::setLastCmdAck(const QVariantMap& ack)
     }
     text += last_cmd_ok_ ? QStringLiteral("OK") : QStringLiteral("REJECTED");
     if (!status.isEmpty()) {
-        text += QLatin1String(" · ") + status;
+        text += QStringLiteral(" | ") + status;
     }
     if (!reason.isEmpty() && reason != QLatin1String("null")) {
-        text += QLatin1String(" · ") + reason;
+        text += QStringLiteral(" | ") + reason;
     }
     const QVariant seq = ack.value(QStringLiteral("seq"));
     if (seq.isValid() && !seq.isNull()) {
-        text += QStringLiteral(" · seq=") + seq.toString();
+        text += QStringLiteral(" | seq=") + seq.toString();
     }
     last_cmd_ack_text_ = text;
     emit lastCmdAckChanged();

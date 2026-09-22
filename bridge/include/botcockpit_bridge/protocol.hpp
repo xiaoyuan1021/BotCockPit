@@ -2,6 +2,9 @@
 
 #include <cstdint>
 
+// Keep MSG_* / FLAG_* in sync with ui/botcockpit/src/protocol.hpp
+// (tools/check_protocol_sync.py). PROTOCOL.md v0.1 is the source of truth.
+
 namespace botcockpit {
 
 // PROTOCOL.md v0.1 — message types

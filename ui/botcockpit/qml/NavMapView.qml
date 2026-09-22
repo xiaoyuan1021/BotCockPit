@@ -2,80 +2,97 @@ import QtQuick
 import QtQuick.Window
 import QtQuick.Layouts
 
-// 2D map: occupancy background (demo corridor), A* path, goal, live pose.
-// Pure presentation — data comes from RobotState / context properties.
+// 2D corridor map: occupancy + A* path + goal + robot pose.
+// All geometry is computed in *canvas* pixels to avoid root/item size mismatch.
 Rectangle {
     id: root
-    // Explicit default size — required so RowLayout does not collapse to 0×0
-    implicitWidth: 320
-    implicitHeight: 220
-    Layout.minimumWidth: 220
-    Layout.minimumHeight: 180
+    implicitWidth: 360
+    implicitHeight: 240
+    Layout.minimumWidth: 240
+    Layout.minimumHeight: 200
     Layout.fillWidth: true
     Layout.fillHeight: true
-    color: "#f7fafc"
+    color: "#ffffff"
     border.color: "#cfd8e6"
     radius: 8
     clip: true
 
-    // World bounds matching nav::GridMap demo (40x20 cells @0.5m, origin 0,-5)
-    property double worldX0: 0.0
-    property double worldY0: -5.0
-    property double worldX1: 20.0
-    property double worldY1: 5.0
-    property double gridRes: 0.5
+    // World frame for nav::GridMap demo (keep in sync with nav.hpp)
+    readonly property real worldX0: 0.0
+    readonly property real worldY0: -5.0
+    readonly property real worldX1: 20.0
+    readonly property real worldY1: 5.0
+    readonly property real gridRes: 0.5
+    readonly property int gridW: 40
+    readonly property int gridH: 20
 
-    readonly property double spanX: worldX1 - worldX0
-    readonly property double spanY: worldY1 - worldY0
+    // Last known nav/pose snapshot for canvas
+    property var pathPts: []
+    property real poseX: 1.25
+    property real poseY: 0.0
+    property real poseYaw: 0.0
+    property real goalX: 0.0
+    property real goalY: 0.0
+    property bool hasGoal: false
 
-    function wx(x) {
-        return (x - worldX0) / spanX * width
+    function worldToScreenX(wx, cw) {
+        return (wx - worldX0) / (worldX1 - worldX0) * cw
     }
-    function wy(y) {
-        return (1.0 - (y - worldY0) / spanY) * height
+    function worldToScreenY(wy, ch) {
+        // y-up world → y-down screen
+        return (1.0 - (wy - worldY0) / (worldY1 - worldY0)) * ch
+    }
+
+    function syncFromState() {
+        var pl = robotState.navPath
+        // Copy to plain JS array so canvas repaints reliably
+        var pts = []
+        for (var i = 0; i < pl.length; ++i) {
+            var p = pl[i]
+            pts.push([Number(p[0]), Number(p[1])])
+        }
+        pathPts = pts
+        poseX = robotState.poseX
+        poseY = robotState.poseY
+        poseYaw = robotState.poseYaw
+        goalX = robotState.navGoalX
+        goalY = robotState.navGoalY
+        hasGoal = robotState.navPathLen > 0
+        mapCanvas.requestPaint()
     }
 
     Canvas {
         id: mapCanvas
         anchors.fill: parent
-        anchors.margins: 1
         antialiasing: true
-
-        property var path: []
-        property real poseX: 0
-        property real poseY: 0
-        property real poseYaw: 0
-        property real goalX: 0
-        property real goalY: 0
-        property bool hasGoal: false
 
         onPaint: {
             var ctx = getContext("2d")
-            ctx.clearRect(0, 0, width, height)
+            var cw = width
+            var ch = height
+            ctx.clearRect(0, 0, cw, ch)
 
-            // occupancy (corridor walls + gap + blocks) — world = origin + cell * res
-            ctx.fillStyle = "#d9e2ec"
-            var res = gridRes
+            var res = root.gridRes
+            ctx.fillStyle = "#dde5ee"
             function cellRect(cx, cy) {
-                // world rect for cell (cx,cy) with GridMap origin (0, -5)
-                var wx0 = worldX0 + cx * res
-                var wy0 = worldY0 + cy * res
-                var x0 = root.wx(wx0)
-                var y1 = root.wy(wy0)
-                var x1 = root.wx(wx0 + res)
-                var y0 = root.wy(wy0 + res)
-                ctx.fillRect(x0, y0, x1 - x0, y1 - y0)
+                var x0 = root.worldToScreenX(root.worldX0 + cx * res, cw)
+                var x1 = root.worldToScreenX(root.worldX0 + (cx + 1) * res, cw)
+                // screen y grows down: top = (cy+1)*res, bottom = cy*res
+                var yTop = root.worldToScreenY(root.worldY0 + (cy + 1) * res, ch)
+                var yBot = root.worldToScreenY(root.worldY0 + cy * res, ch)
+                ctx.fillRect(x0, yTop, x1 - x0, yBot - yTop)
             }
-            for (var x = 0; x < 40; ++x) {
+            // Borders
+            for (var x = 0; x < root.gridW; ++x) {
                 cellRect(x, 0)
-                cellRect(x, 19)
+                cellRect(x, root.gridH - 1)
             }
-            for (var y = 0; y < 20; ++y) {
+            for (var y = 0; y < root.gridH; ++y) {
                 cellRect(0, y)
-                cellRect(39, y)
+                cellRect(root.gridW - 1, y)
             }
-            // wall at cx=20 with gap cy 8..10
-            for (y = 2; y < 18; ++y) {
+            // Wall with gap at cy = 8,9,10 (nav::make_corridor_demo)
+            for (y = 2; y < root.gridH - 2; ++y) {
                 if (y === 8 || y === 9 || y === 10)
                     continue
                 cellRect(20, y)
@@ -83,99 +100,83 @@ Rectangle {
             cellRect(5, 4)
             cellRect(6, 4)
 
-            // grid light
+            // Light grid
             ctx.strokeStyle = "#eef2f7"
             ctx.lineWidth = 1
-            for (x = 0; x <= 40; x += 4) {
+            for (x = 0; x <= root.gridW; x += 4) {
+                var gx = root.worldToScreenX(root.worldX0 + x * res, cw)
                 ctx.beginPath()
-                ctx.moveTo(root.wx(x * res), 0)
-                ctx.lineTo(root.wx(x * res), height)
+                ctx.moveTo(gx, 0)
+                ctx.lineTo(gx, ch)
                 ctx.stroke()
             }
-            for (y = 0; y <= 20; y += 4) {
+            for (y = 0; y <= root.gridH; y += 4) {
+                var gy = root.worldToScreenY(root.worldY0 + y * res, ch)
                 ctx.beginPath()
-                ctx.moveTo(0, root.wy(y * res))
-                ctx.lineTo(width, root.wy(y * res))
+                ctx.moveTo(0, gy)
+                ctx.lineTo(cw, gy)
                 ctx.stroke()
             }
 
-            // A* path
-            if (path && path.length > 1) {
+            // Path
+            var pts = root.pathPts
+            if (pts && pts.length > 1) {
                 ctx.strokeStyle = "#1a6fd4"
                 ctx.lineWidth = 2
                 ctx.beginPath()
-                for (var i = 0; i < path.length; ++i) {
-                    var p = path[i]
-                    var px = root.wx(p[0])
-                    var py = root.wy(p[1])
+                for (var i = 0; i < pts.length; ++i) {
+                    var px = root.worldToScreenX(pts[i][0], cw)
+                    var py = root.worldToScreenY(pts[i][1], ch)
                     if (i === 0)
                         ctx.moveTo(px, py)
                     else
                         ctx.lineTo(px, py)
                 }
                 ctx.stroke()
-                // waypoints
-                ctx.fillStyle = "#1a6fd4"
-                for (i = 0; i < path.length; i += 2) {
-                    p = path[i]
-                    ctx.beginPath()
-                    ctx.arc(root.wx(p[0]), root.wy(p[1]), 2, 0, Math.PI * 2)
-                    ctx.fill()
-                }
             }
 
-            // goal
-            if (hasGoal) {
+            // Goal cross
+            if (root.hasGoal) {
+                var gxs = root.worldToScreenX(root.goalX, cw)
+                var gys = root.worldToScreenY(root.goalY, ch)
                 ctx.strokeStyle = "#0f8a4a"
                 ctx.lineWidth = 2
-                var gx = root.wx(goalX)
-                var gy = root.wy(goalY)
                 ctx.beginPath()
-                ctx.moveTo(gx - 8, gy)
-                ctx.lineTo(gx + 8, gy)
-                ctx.moveTo(gx, gy - 8)
-                ctx.lineTo(gx, gy + 8)
+                ctx.moveTo(gxs - 8, gys)
+                ctx.lineTo(gxs + 8, gys)
+                ctx.moveTo(gxs, gys - 8)
+                ctx.lineTo(gxs, gys + 8)
                 ctx.stroke()
                 ctx.beginPath()
-                ctx.arc(gx, gy, 6, 0, Math.PI * 2)
+                ctx.arc(gxs, gys, 5, 0, Math.PI * 2)
                 ctx.stroke()
             }
 
-            // pose arrow
-            var rx = root.wx(poseX)
-            var ry = root.wy(poseY)
-            var yaw = poseYaw
+            // Robot triangle
+            var rx = root.worldToScreenX(root.poseX, cw)
+            var ry = root.worldToScreenY(root.poseY, ch)
             ctx.save()
             ctx.translate(rx, ry)
-            ctx.rotate(-yaw)  // canvas y-down
+            // world yaw CCW; canvas y-down → draw with -yaw
+            ctx.rotate(-root.poseYaw)
             ctx.fillStyle = robotState.estop ? "#c62828" : "#1565c0"
             ctx.beginPath()
-            ctx.moveTo(10, 0)
-            ctx.lineTo(-6, 5)
-            ctx.lineTo(-6, -5)
+            ctx.moveTo(11, 0)
+            ctx.lineTo(-7, 6)
+            ctx.lineTo(-7, -6)
             ctx.closePath()
             ctx.fill()
             ctx.restore()
         }
 
-        function syncFromState() {
-            path = robotState.navPath
-            poseX = robotState.poseX
-            poseY = robotState.poseY
-            poseYaw = robotState.poseYaw
-            goalX = robotState.navGoalX
-            goalY = robotState.navGoalY
-            hasGoal = robotState.navPathLen > 0
-            requestPaint()
-        }
-
         Connections {
             target: robotState
-            function onNavStatusChanged() { mapCanvas.syncFromState() }
-            function onPoseChanged() { mapCanvas.syncFromState() }
-            function onEstopChanged() { mapCanvas.syncFromState() }
+            function onNavStatusChanged() { root.syncFromState() }
+            function onPoseChanged() { root.syncFromState() }
+            function onEstopChanged() { root.syncFromState() }
+            function onHasRobotStateChanged() { root.syncFromState() }
         }
-        Component.onCompleted: syncFromState()
+        Component.onCompleted: root.syncFromState()
     }
 
     Column {
@@ -190,7 +191,7 @@ Rectangle {
             font.pixelSize: 12
         }
         Text {
-            text: robotState.navStatus + " · err " + robotState.trackErr.toFixed(2) + " m"
+            text: robotState.navStatus + " | err " + robotState.trackErr.toFixed(2) + " m"
             color: "#5d6b80"
             font.pixelSize: 11
         }

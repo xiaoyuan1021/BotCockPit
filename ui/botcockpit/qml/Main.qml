@@ -188,7 +188,7 @@ ApplicationWindow {
             anchors.left: parent.left
             anchors.leftMargin: 14
             text: robotState.connected
-                  ? ("proto " + robotState.proto + " · " + robotState.server)
+                  ? ("proto " + robotState.proto + " | " + robotState.server)
                   : (robotState.errorString !== "" ? robotState.errorString : qsTr("Ready"))
             color: root.colMuted
             font.pixelSize: 12

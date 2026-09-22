@@ -120,7 +120,7 @@ Pane {
                     Text {
                         Layout.columnSpan: 3
                         text: (robotState.taskType.length ? robotState.taskType : "—")
-                              + " · " + robotState.taskStatus
+                              + " | " + robotState.taskStatus
                         color: pane.win.colInk
                         font.bold: true
                     }

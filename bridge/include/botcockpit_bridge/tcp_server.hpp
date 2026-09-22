@@ -52,7 +52,6 @@ class TcpServer {
     FrameDecoder decoder;
     uint64_t last_rx_ms = 0;
     uint64_t last_hb_rx_ms = 0;
-    uint64_t last_hb_tx_ms = 0;
     bool hello_ok = false;
     std::mutex send_mu;
   };
