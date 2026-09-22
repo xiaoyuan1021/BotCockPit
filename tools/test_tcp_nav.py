@@ -22,6 +22,7 @@ from fake_client import (
     MSG_CMD_TASK,
     MSG_HEARTBEAT,
     MSG_HELLO,
+    MSG_HELLO_ACK,
     MSG_STATE_DELTA,
     MSG_STATE_SNAPSHOT,
     encode_frame,
@@ -93,8 +94,14 @@ def main() -> int:
     print("TASK ACK", task_acks[0])
     assert task_acks[0].get("ok"), task_acks[0]
 
-    frames = recv_until(sock, lambda f: (json.loads(p[3].decode() or "{}").get("phase") == "RUNNING"
-                                         if f[0] in (MSG_STATE_SNAPSHOT, MSG_STATE_DELTA) else False), 5.0)
+    frames = recv_until(
+        sock,
+        lambda f: (
+            f[0] in (MSG_STATE_SNAPSHOT, MSG_STATE_DELTA)
+            and json.loads(f[3].decode() or "{}").get("phase") == "RUNNING"
+        ),
+        6.0,
+    )
     nav_states = [json.loads(p.decode()) for t, fl, s, p in frames if t in (MSG_STATE_SNAPSHOT, MSG_STATE_DELTA)]
     tracking = [s for s in nav_states if (s.get("nav") or {}).get("status") == "TRACKING"]
     print("TRACKING samples", len(tracking), "path_len", (tracking[-1].get("nav") or {}).get("path_len") if tracking else None)
