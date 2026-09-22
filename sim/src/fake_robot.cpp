@@ -432,8 +432,9 @@ void FakeRobot::tick()
       const auto& goal_wp = nav_path_.back();
       if (nav_idx_ + 1 >= nav_path_.size() &&
           dist(pose_x_, pose_y_, goal_wp.first, goal_wp.second) < 0.35) {
-        pose_x_ = goal_wp.first;
-        pose_y_ = goal_wp.second;
+        // Snap to exact commanded goal (end-point alignment)
+        pose_x_ = goal_x_;
+        pose_y_ = goal_y_;
         task_status_ = "DONE";
         phase_ = "IDLE";
         nav_status_ = "IDLE";
@@ -715,17 +716,46 @@ void FakeRobot::on_cmd(const std_msgs::msg::String::SharedPtr msg)
     extract_string(data, "type", type);
     extract_string(data, "task_id", task_id);
 
+    // Control verbs allowed while RUNNING (except resume start conditions).
+    if (type == "pause") {
+      if (phase_ == "RUNNING") {
+        task_status_ = "ACCEPTED";
+        phase_ = "IDLE";
+        nav_status_ = "IDLE";
+        recompute_phase_and_control();
+        publish_cmd_result(seq, cmd, true, "ACCEPTED", "", task_id_);
+      } else {
+        publish_cmd_result(seq, cmd, false, "REJECTED", "unknown_task", task_id);
+      }
+      publish_state();
+      return;
+    }
+    if (type == "cancel") {
+      task_status_ = "NONE";
+      task_id_.clear();
+      task_type_.clear();
+      nav_path_.clear();
+      nav_status_ = "IDLE";
+      if (phase_ == "RUNNING") {
+        phase_ = "IDLE";
+      }
+      recompute_phase_and_control();
+      publish_cmd_result(seq, cmd, true, "ACCEPTED", "");
+      publish_state();
+      return;
+    }
+
     if (blocked) {
       publish_cmd_result(seq, cmd, false, "REJECTED",
                          estop_ ? "estop_active" : "phase_busy", task_id);
       return;
     }
-    if (phase_ == "RUNNING") {
-      publish_cmd_result(seq, cmd, false, "REJECTED", "phase_busy", task_id);
-      return;
-    }
 
     if (type == "goto") {
+      if (phase_ == "RUNNING") {
+        publish_cmd_result(seq, cmd, false, "REJECTED", "phase_busy", task_id);
+        return;
+      }
       double x = pose_x_;
       double y = pose_y_;
       extract_number(data, "x", x);
@@ -737,7 +767,6 @@ void FakeRobot::on_cmd(const std_msgs::msg::String::SharedPtr msg)
         publish_cmd_result(seq, cmd, true, "DONE", "", task_id);
         return;
       }
-      // Plan A: A* on demo corridor map (with inflation)
       nav_map_ = nav::GridMap::make_corridor_demo();
       nav_map_.inflate(1);
       nav_status_ = "PLANNING";
@@ -765,23 +794,13 @@ void FakeRobot::on_cmd(const std_msgs::msg::String::SharedPtr msg)
       publish_state();
       return;
     }
-    if (type == "pause") {
-      if (phase_ == "RUNNING") {
-        task_status_ = "ACCEPTED";
-        phase_ = "IDLE";
-        recompute_phase_and_control();
-        publish_cmd_result(seq, cmd, true, "ACCEPTED", "", task_id_);
-      } else {
-        publish_cmd_result(seq, cmd, false, "REJECTED", "unknown_task", task_id);
-      }
-      publish_state();
-      return;
-    }
     if (type == "resume") {
       if (!task_id_.empty() && task_type_ == "goto" && !estop_ &&
-          phase_ == "IDLE" && console_online_ && !has_error_condition()) {
+          phase_ == "IDLE" && console_online_ && !has_error_condition() &&
+          !nav_path_.empty()) {
         phase_ = "RUNNING";
         task_status_ = "EXECUTING";
+        nav_status_ = "TRACKING";
         control_enabled_ = false;
         publish_cmd_result(seq, cmd, true, "ACCEPTED", "", task_id_);
       } else {

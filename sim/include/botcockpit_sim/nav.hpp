@@ -190,6 +190,10 @@ inline std::vector<std::pair<double, double>> astar(const GridMap& map,
         c = came[static_cast<size_t>(c)];
       }
       std::reverse(path.begin(), path.end());
+      if (!path.empty()) {
+        // Exact commanded goal (not just grid cell center)
+        path.back() = {gx, gy};
+      }
       return path;
     }
     const int cx = cur % W;
