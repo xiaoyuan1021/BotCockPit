@@ -1,10 +1,18 @@
 import QtQuick
 import QtQuick.Window
+import QtQuick.Layouts
 
 // 2D map: occupancy background (demo corridor), A* path, goal, live pose.
 // Pure presentation — data comes from RobotState / context properties.
 Rectangle {
     id: root
+    // Explicit default size — required so RowLayout does not collapse to 0×0
+    implicitWidth: 320
+    implicitHeight: 220
+    Layout.minimumWidth: 220
+    Layout.minimumHeight: 180
+    Layout.fillWidth: true
+    Layout.fillHeight: true
     color: "#f7fafc"
     border.color: "#cfd8e6"
     radius: 8

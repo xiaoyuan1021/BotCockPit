@@ -105,6 +105,8 @@ Pane {
             NavMapView {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                Layout.preferredWidth: 320
+                Layout.minimumWidth: 220
                 Layout.minimumHeight: 200
             }
 
