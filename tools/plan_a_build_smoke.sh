@@ -51,14 +51,19 @@ while time.time()-t0<5:
 cmdp.publish(String(data=json.dumps({"seq":9002,"cmd":"CMD_TASK","payload":{"task_id":"T-nav","type":"goto","x":18.0,"y":0.0}})))
 t1=time.time()
 samples=[]
-while time.time()-t1<8:
+while time.time()-t1<10:
     rclpy.spin_once(n, timeout_sec=0.05)
     nav=last.get("nav") or {}
-    samples.append((last.get("phase"), last.get("task",{}).get("status"), nav.get("status"), nav.get("path_len"), (last.get("pose") or {}).get("x")))
+    samples.append((round((last.get("pose") or {}).get("x") or 0, 3),
+                    round((last.get("pose") or {}).get("y") or 0, 3),
+                    round((last.get("pose") or {}).get("yaw") or 0, 3),
+                    nav.get("status"), nav.get("track_err")))
 print("ack", acks.get("ack"))
-print("samples", samples[:15])
-ok = acks.get("ack") and acks["ack"].get("ok") and any(s[2] in ("TRACKING","PLANNING") for s in samples)
-print("NAV_SMOKE", "PASS" if ok else "CHECK")
+print("samples", samples[:20])
+xs = [s[0] for s in samples if s[3] == "TRACKING"]
+moved = xs and (max(xs) - min(xs)) > 0.2
+ok = acks.get("ack") and acks["ack"].get("ok") and any(s[3] in ("TRACKING", "PLANNING") for s in samples) and moved
+print("NAV_SMOKE", "PASS" if ok else "CHECK", "dx=", (max(xs) - min(xs)) if xs else None)
 n.destroy_node(); rclpy.shutdown()
 PY
 pkill -9 -f 'fake_robot' 2>/dev/null || true

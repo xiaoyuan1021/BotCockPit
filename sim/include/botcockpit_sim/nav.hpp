@@ -226,26 +226,24 @@ inline void pure_pursuit(double x, double y, double yaw,
   if (path.empty() || idx >= path.size()) {
     return;
   }
-  // Advance index when close to current waypoint
+  // Advance waypoint index when close
   while (idx + 1 < path.size()) {
     const double dx = path[idx].first - x;
     const double dy = path[idx].second - y;
-    if (std::hypot(dx, dy) < 0.25) {
+    if (std::hypot(dx, dy) < 0.3) {
       ++idx;
     } else {
       break;
     }
   }
-  // Find lookahead point
   size_t target = idx;
   for (size_t i = idx; i < path.size(); ++i) {
     const double dx = path[i].first - x;
     const double dy = path[i].second - y;
+    target = i;
     if (std::hypot(dx, dy) >= lookahead) {
-      target = i;
       break;
     }
-    target = i;
   }
   const double tx = path[target].first;
   const double ty = path[target].second;
@@ -253,17 +251,26 @@ inline void pure_pursuit(double x, double y, double yaw,
   const double dy = ty - y;
   const double local_x = std::cos(yaw) * dx + std::sin(yaw) * dy;
   const double local_y = -std::sin(yaw) * dx + std::cos(yaw) * dy;
-  const double Ld = std::max(0.15, std::hypot(dx, dy));
-  v = 0.45;
-  w = 2.0 * v * local_y / (Ld * Ld);
-  if (local_x < 0.0) {
-    // goal behind: rotate in place
-    v = 0.05;
-    w = (local_y >= 0 ? 1.0 : -1.0) * 0.8;
+  const double dist = std::max(0.05, std::hypot(dx, dy));
+  const double alpha = std::atan2(local_y, local_x);
+
+  // Heading error large → rotate in place first (avoid circling)
+  if (std::abs(alpha) > 0.9) {
+    v = 0.0;
+    w = (alpha > 0.0 ? 1.0 : -1.0) * 0.9;
+    return;
   }
-  // clamp
-  if (w > 1.2) w = 1.2;
-  if (w < -1.2) w = -1.2;
+  // Target roughly behind → arc turn, never constant-sign spin at v~0
+  if (local_x < 0.0) {
+    v = 0.12;
+    w = (alpha >= 0.0 ? 1.0 : -1.0) * 0.7;
+    return;
+  }
+  v = (std::abs(alpha) > 0.5 ? 0.18 : 0.4);
+  // geometric pure pursuit: κ = 2 sin(α) / L
+  w = 2.0 * v * std::sin(alpha) / dist;
+  if (w > 1.1) w = 1.1;
+  if (w < -1.1) w = -1.1;
 }
 
 inline std::string path_to_json(const std::vector<std::pair<double, double>>& path)

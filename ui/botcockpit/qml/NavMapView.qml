@@ -23,6 +23,7 @@ Rectangle {
     property double worldY0: -5.0
     property double worldX1: 20.0
     property double worldY1: 5.0
+    property double gridRes: 0.5
 
     readonly property double spanX: worldX1 - worldX0
     readonly property double spanY: worldY1 - worldY0
@@ -52,15 +53,17 @@ Rectangle {
             var ctx = getContext("2d")
             ctx.clearRect(0, 0, width, height)
 
-            // occupancy (corridor walls + gap + blocks) — mirrors nav::make_corridor_demo
+            // occupancy (corridor walls + gap + blocks) — world = origin + cell * res
             ctx.fillStyle = "#d9e2ec"
-            // outer border 1 cell thick
-            var res = 0.5
+            var res = gridRes
             function cellRect(cx, cy) {
-                var x0 = root.wx(cx * res)
-                var y0 = root.wy((cy + 1) * res)
-                var x1 = root.wx((cx + 1) * res)
-                var y1 = root.wy(cy * res)
+                // world rect for cell (cx,cy) with GridMap origin (0, -5)
+                var wx0 = worldX0 + cx * res
+                var wy0 = worldY0 + cy * res
+                var x0 = root.wx(wx0)
+                var y1 = root.wy(wy0)
+                var x1 = root.wx(wx0 + res)
+                var y0 = root.wy(wy0 + res)
                 ctx.fillRect(x0, y0, x1 - x0, y1 - y0)
             }
             for (var x = 0; x < 40; ++x) {
