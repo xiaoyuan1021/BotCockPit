@@ -107,8 +107,11 @@ ApplicationWindow {
                 Text {
                     id: linkText
                     text: robotState.connected
-                          ? (qsTr("ONLINE") + " · " + robotState.heartbeatRttMs + " ms")
-                          : (robotState.connecting ? qsTr("CONNECTING…") : qsTr("OFFLINE"))
+                          ? (qsTr("LINK") + " " + robotState.heartbeatRttMs + "ms"
+                             + (robotState.hasRobotState
+                                ? ("  |  " + qsTr("ROBOT: ") + robotState.conn)
+                                : ("  |  " + qsTr("ROBOT: …"))))
+                          : (robotState.connecting ? qsTr("LINK…") : qsTr("LINK DOWN"))
                     color: robotState.connected ? root.colOk : root.colDanger
                     font.bold: true
                     anchors.verticalCenter: parent.verticalCenter
@@ -133,10 +136,10 @@ ApplicationWindow {
                     width: parent.width - 16
                     horizontalAlignment: Text.AlignHCenter
                     text: {
-                        if (!robotState.connected) return qsTr("OFFLINE")
+                        if (!robotState.connected) return qsTr("NO LINK")
                         if (robotState.estop) return qsTr("ESTOP")
-                        return robotState.controlEnabled ? robotState.phase
-                             : (robotState.phase + " · ctl off")
+                        if (!robotState.hasRobotState) return qsTr("WAIT ROBOT")
+                        return robotState.phase
                     }
                     color: !robotState.connected ? root.colMuted
                          : robotState.estop ? root.colEstop
